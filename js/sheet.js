@@ -1,11 +1,11 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.5.1";
-import { getRoller } from "./dice.js?v=0.5.1";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.1";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.5.1";
-import { useMove, describe } from "./combat.js?v=0.5.1";
-import { TYPE_COLOR, die } from "./ui.js?v=0.5.1";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.1";
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.5.2";
+import { getRoller } from "./dice.js?v=0.5.2";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.2";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.5.2";
+import { useMove, describe } from "./combat.js?v=0.5.2";
+import { TYPE_COLOR, die } from "./ui.js?v=0.5.2";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.2";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 

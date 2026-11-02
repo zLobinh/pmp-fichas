@@ -1,18 +1,22 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.5.1";
-import { describe } from "./combat.js?v=0.5.1";
-import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.5.1";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.5.1";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.5.1";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.5.2";
+import { describe } from "./combat.js?v=0.5.2";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.5.2";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.5.2";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.5.2";
 
-let hudOpen = false;
+let lastSelection = "";
 
+// selecting one Pokémon you control opens the quick sheet (an open one follows the selection itself)
 async function onSelection(selection) {
-  if (hudOpen || !autoHudEnabled() || !selection || selection.length !== 1) return;
+  const key = (selection ?? []).join(",");
+  if (key === lastSelection) return; // player.onChange also fires for metadata changes
+  lastSelection = key;
+  if (!autoHudEnabled() || !selection || selection.length !== 1 || hudAlive()) return;
   const [item] = await OBR.scene.items.getItems(selection);
   const sheet = getSheet(item);
   if (!sheet || !(await canEdit(sheet))) return;
-  hudOpen = true;
+  markHudAlive(); // until the new popover starts its own heartbeat
   await openHud(item.id);
 }
 
@@ -27,6 +31,18 @@ OBR.onReady(() => {
       },
     ],
     onClick: (context, elementId) => openSheet(context.items[0].id, elementId),
+  });
+
+  OBR.contextMenu.create({
+    id: `${ID}/quick`,
+    icons: [
+      {
+        icon: asset("icons/area.svg"),
+        label: "Ficha rápida (HP e moves)",
+        filter: { max: 1, every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
+      },
+    ],
+    onClick: (context) => { markHudAlive(); openHud(context.items[0].id); },
   });
 
   OBR.contextMenu.create({
@@ -48,8 +64,7 @@ OBR.onReady(() => {
   });
 
   OBR.player.onChange((player) => onSelection(player.selection));
-  OBR.broadcast.onMessage(`${ID}/hud-closed`, () => { hudOpen = false; });
-  OBR.scene.onReadyChange((ready) => { if (!ready) hudOpen = false; });
+  OBR.broadcast.onMessage(`${ID}/hud-closed`, () => markHudAlive(false));
 
   OBR.broadcast.onMessage(FX_CHANNEL, ({ data }) => { playFx(data).catch(() => {}); });
   OBR.broadcast.onMessage(AIM_START, ({ data }) => {

@@ -1,11 +1,11 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.1";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.1";
-import { useMove } from "./combat.js?v=0.5.1";
-import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.5.1";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.1";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.1";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.2";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.2";
+import { useMove } from "./combat.js?v=0.5.2";
+import { TYPE_COLOR, openSheet, die, markHudAlive } from "./ui.js?v=0.5.2";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.2";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.2";
 
 const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
 
@@ -268,9 +268,16 @@ async function roll(ignoreRange, area = false) {
 }
 
 async function close() {
+  clearInterval(heartbeat);
+  markHudAlive(false);
   await OBR.broadcast.sendMessage(`${ID}/hud-closed`, {}, { destination: "LOCAL" });
   await OBR.popover.close(HUD_ID);
 }
+
+// tells the background this quick sheet is open (see markHudAlive in ui.js)
+markHudAlive();
+const heartbeat = setInterval(markHudAlive, 1000);
+addEventListener("pagehide", () => markHudAlive(false));
 
 function render() {
   const sheet = getSheet(state.item);

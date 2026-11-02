@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.5.1";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.5.2";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -34,6 +34,17 @@ export function die(value, { sides = 20, kind = "", animate = false } = {}) {
   return el;
 }
 const AUTO_HUD_KEY = `${ID}/autoHud`;
+
+// The open quick sheet writes a heartbeat here every second; the background only opens a new
+// one when the heartbeat is stale (a flag cleared on "closed" got stuck when the popover closed
+// some other way, and then the quick sheet never opened again).
+const HUD_ALIVE_KEY = `${ID}/hudAlive`;
+export function markHudAlive(on = true) {
+  try { if (on) localStorage.setItem(HUD_ALIVE_KEY, String(Date.now())); else localStorage.removeItem(HUD_ALIVE_KEY); } catch {}
+}
+export function hudAlive() {
+  try { return Date.now() - Number(localStorage.getItem(HUD_ALIVE_KEY) || 0) < 2500; } catch { return false; }
+}
 
 // per-player preference, kept in this browser
 export function autoHudEnabled() {

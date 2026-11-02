@@ -1,9 +1,9 @@
 // Using a move: attack rolls / saving throws against each target, damage with type effectiveness,
 // then HP and PP changes written back to the tokens. Dice go through Dice+ when it is in the room.
-import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.5.1";
-import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.5.1";
-import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.5.1";
-import { getRoller } from "./dice.js?v=0.5.1";
+import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.5.2";
+import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.5.2";
+import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.5.2";
+import { getRoller } from "./dice.js?v=0.5.2";
 
 const effLabel = (m) => (m === 0 ? "imune" : m >= 4 ? "super efetivo ×4" : m >= 2 ? "super efetivo ×2" : m <= 0.25 ? "pouco efetivo ×¼" : m < 1 ? "pouco efetivo ×½" : "");
 
