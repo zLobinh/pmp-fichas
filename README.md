@@ -25,7 +25,9 @@ A ficha fica guardada no próprio token, então todo mundo vê a mesma coisa. Os
 
 ## Publicar no GitHub Pages
 
-1. Crie um repositório no GitHub (ex.: `pmp-fichas`) e envie **o conteúdo desta pasta** pra raiz dele.
+1. Crie um repositório no GitHub chamado `pmp-fichas` e envie **o conteúdo desta pasta** pra raiz dele.
+   Os caminhos do `manifest.json` começam com `/pmp-fichas/` porque o Owlbear monta o endereço a partir do domínio.
+   Se o repositório tiver outro nome, troque `/pmp-fichas/` pelo nome dele nas 4 linhas do manifest.
 2. No repositório: *Settings → Pages → Build and deployment → Source: Deploy from a branch*, branch `main`, pasta `/ (root)`. Salve.
 3. Espere 1–2 minutos. O link fica `https://SEU-USUARIO.github.io/pmp-fichas/`.
 4. No Owlbear: perfil → *Extensions* → **+** → `https://SEU-USUARIO.github.io/pmp-fichas/manifest.json`.
