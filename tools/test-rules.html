@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Teste das regras</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; padding: 16px; background: #1e2231; color: #eceef6; }
+      .ok { color: #46c37b; } .no { color: #ef5d5d; }
+      pre { background: #262b3d; padding: 8px; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Teste das regras do PMP</h1>
+    <p>
+      Casos de <code>unit_test/tests/trainer.lua</code> do app (Bulbasaur nível 20, sem bônus de treinador),
+      com os valores esperados recalculados para os moves atuais do PMP (os testes do app são de dados antigos).
+    </p>
+    <div id="out">Rodando…</div>
+    <script type="module">
+      import { Rules } from "../js/rules.js";
+      const load = (f) => fetch(`../data/${f}.json`).then((r) => r.json());
+      const [moves, pokemon, rules] = await Promise.all(["moves", "pokemon", "rules"].map(load));
+      const R = new Rules({ moves, pokemon, rules });
+
+      // pokemon.new({species="Bulbasaur"}) + set_current_level(20)
+      const sp = pokemon.Bulbasaur;
+      const conMod = Math.floor((sp.attributes.CON - 10) / 2);
+      const bulba = {
+        species: { caught: "Bulbasaur", current: "Bulbasaur" },
+        level: { caught: 1, current: 20 },
+        attributes: { STR: 0, DEX: 0, CON: 0, INT: 0, WIS: 0, CHA: 0, increased: {}, custom: {} },
+        nature: "No Nature", feats: [], abilities: [], loyalty: 0,
+        hp: { max: sp.HP - sp["MIN LVL FD"] * conMod, current: 1 },
+        moves: { Tackle: { index: 1 }, "Razor Leaf": { index: 2 }, "Acid Spray": { index: 3 }, Struggle: { index: 4 } },
+      };
+      const checks = [
+        // acerto = maior mod entre os atributos do Move (+ modificador) + prof 6
+        ["Tackle acerto", R.moveData(bulba, "Tackle").attackBonus, 7],
+        ["Acid Spray acerto", R.moveData(bulba, "Acid Spray").attackBonus, 7],
+        // CD = 8 + (mod DES 1 - 1 do Move Power) + prof 6
+        ["Razor Leaf CD", R.moveData(bulba, "Razor Leaf").saveDC, 14],
+        ["Acid Spray CD", R.moveData(bulba, "Acid Spray").saveDC, 15],
+        // dano = dados do nível 17 + STAB 5 (se o tipo bate) + mod do atributo sem o modificador
+        ["Tackle dano", R.moveData(bulba, "Tackle").damageText, "2d10+1"],
+        ["Razor Leaf dano", R.moveData(bulba, "Razor Leaf").damageText, "3d10+6"],
+        ["Acid Spray dano", R.moveData(bulba, "Acid Spray").damageText, "2d10+6"],
+        ["Struggle dano", R.moveData(bulba, "Struggle").damageText, "4d6+1"],
+        ["CA", R.ac(bulba), 13],
+        ["Fogo contra Grama/Veneno", R.effectiveness("Fire", bulba), 2],
+        ["Água contra Grama/Veneno", R.effectiveness("Water", bulba), 0.5],
+      ];
+      const rows = checks.map(([n, got, exp]) => `<div class="${got === exp ? "ok" : "no"}">${got === exp ? "✔" : "✘"} ${n}: ${got} (esperado ${exp})</div>`);
+      const info = {
+        atributos: R.attributes(bulba), CA: R.ac(bulba), HPmax: R.maxHP(bulba), prof: R.proficiency(bulba), STAB: R.stabBonus(bulba),
+        moves: R.moveList(bulba).map((m) => ({ nome: m.label, acerto: m.attackBonus, CD: m.saveDC, dano: m.damageText, pp: `${m.pp}/${m.ppMax}` })),
+        "Fire vs Bulbasaur": R.effectiveness("Fire", bulba), "Psychic vs Bulbasaur": R.effectiveness("Psychic", bulba), "Water vs Bulbasaur": R.effectiveness("Water", bulba),
+      };
+      document.getElementById("out").innerHTML = rows.join("") + `<pre>${JSON.stringify(info, null, 1)}</pre>`;
+      window.__results = checks.map(([n, got, exp]) => ({ n, got, exp, ok: got === exp }));
+    </script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Importar ficha</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <div class="bar"><h1>Importar ficha do PMP</h1><button class="icon" id="close" title="Fechar">✕</button></div>
+      <div class="scroll">
+        <p class="muted small" style="margin-top: 0">
+          No app, abra o Pokémon e use <b>Exportar</b> (copia o código). Cole aqui embaixo.
+        </p>
+        <textarea id="code" rows="11" placeholder='{"species":{"current":"Bulbasaur", ...}}'></textarea>
+        <label class="row small" style="margin-top: 6px">
+          <input type="checkbox" id="rename" checked /> Usar o nome do Pokémon no token
+        </label>
+        <div class="err" id="err"></div>
+        <div class="row">
+          <span class="spacer"></span>
+          <button id="cancel">Cancelar</button>
+          <button class="primary" id="ok">Importar</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="js/import.js"></script>
+  </body>
+</html>

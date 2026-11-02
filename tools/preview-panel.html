@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prévia do painel</title>
+    <!-- swaps the real Owlbear SDK for the in-memory mock -->
+    <script type="importmap">
+      { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js" } }
+    </script>
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>body { width: 380px; height: 520px; border-right: 1px dashed #555; }</style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="bar"><h1>PMP Fichas</h1></div>
+      <div class="scroll" id="root"></div>
+    </div>
+    <script type="module" src="../js/panel.js"></script>
+  </body>
+</html>
