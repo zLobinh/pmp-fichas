@@ -1,11 +1,11 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.0";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.0";
-import { useMove } from "./combat.js?v=0.5.0";
-import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.5.0";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.0";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.0";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.1";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.1";
+import { useMove } from "./combat.js?v=0.5.1";
+import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.5.1";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.1";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.1";
 
 const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
 

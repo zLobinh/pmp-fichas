@@ -1,9 +1,9 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.5.0";
-import { describe } from "./combat.js?v=0.5.0";
-import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.5.0";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.5.0";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.5.0";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.5.1";
+import { describe } from "./combat.js?v=0.5.1";
+import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.5.1";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.5.1";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.5.1";
 
 let hudOpen = false;
 

@@ -1,7 +1,7 @@
 // Rolls go through Dice+ (3D dice on everyone's screen) when it is in the room,
 // otherwise through our own dice. Protocol: https://extensions.owlbear.rodeo/dice-plus
-import { OBR, ID } from "./store.js?v=0.5.0";
-import { d, rollDice } from "./rules.js?v=0.5.0";
+import { OBR, ID } from "./store.js?v=0.5.1";
+import { d, rollDice } from "./rules.js?v=0.5.1";
 
 const SOURCE = ID; // results come back on `${SOURCE}/roll-result`
 const pending = new Map();
@@ -77,23 +77,27 @@ export async function getRoller({ useDicePlus = true, showResults = true } = {})
   if (!viaDicePlus) return internal;
   return {
     name: "Dice+",
-    // "1d20+7, 1d20+7, 3d10+6 # Hyper Voice": Dice+ throws all of it at once; its groups come back in
-    // the same order, matched here part by part by die type
+    // ONE expression with every die of the move, e.g. "3d20 + 3d10 # Hyper Voice": Dice+ throws all of
+    // them together (a comma list would be animated roll after roll). The dice come back by type and
+    // are handed out to the parts in order; bonuses are added by the caller, not by Dice+.
     async batch(parts, text) {
       const out = parts.map(() => null);
       const thrown = parts.map((p, i) => ({ ...p, i })).filter((p) => p.amount > 0 && p.sides >= 2);
       if (thrown.length) {
         try {
-          const notation = thrown.map((p) => `${p.amount}d${p.sides}${withBonus(p.bonus)}`).join(", ") + label(text);
+          const count = new Map(); // sides -> dice, in order of first use
+          for (const p of thrown) count.set(p.sides, (count.get(p.sides) ?? 0) + p.amount);
+          const notation = [...count].map(([sides, n]) => `${n}d${sides}`).join(" + ") + label(text);
           const r = await dicePlusRoll(notation, showResults);
-          const groups = r.groups.filter((g) => !g.isNegative);
-          let cursor = 0;
+          const pool = new Map();
+          for (const g of r.groups) {
+            if (g.isNegative) continue;
+            const sides = parseInt(String(g.diceType).replace(/\D/g, ""), 10);
+            pool.set(sides, [...(pool.get(sides) ?? []), ...kept(g)]);
+          }
           for (const p of thrown) {
-            const at = groups.findIndex((g, gi) => gi >= cursor && g.diceType === `d${p.sides}`);
-            if (at < 0) continue;
-            const dice = kept(groups[at]);
+            const dice = (pool.get(p.sides) ?? []).splice(0, p.amount);
             if (dice.length === p.amount) out[p.i] = { dice };
-            cursor = at + 1;
           }
         } catch {}
       }
