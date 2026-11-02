@@ -39,7 +39,9 @@ const OBR = {
     items: {
       getItems: async (filter) => clone(Array.isArray(filter) ? items.filter((i) => filter.includes(i.id)) : typeof filter === "function" ? items.filter(filter) : items),
       updateItems: async (ids, fn) => {
-        const drafts = items.filter((i) => ids.includes(i.id));
+        // like the real SDK (immer), drafts are proxies: structuredClone on them throws
+        const wrap = (o) => new Proxy(o, { get: (t, k) => (t[k] && typeof t[k] === "object" ? wrap(t[k]) : t[k]) });
+        const drafts = items.filter((i) => ids.includes(i.id)).map(wrap);
         fn(drafts);
         emit("items", clone(items));
       },
@@ -62,7 +64,12 @@ const OBR = {
   theme: { getTheme: async () => ({ mode: "DARK" }), onChange: () => {} },
   notification: { show: async (msg, v) => { console.log("[notificação]", v, msg); (window.__notes ??= []).push(msg); } },
   broadcast: { sendMessage: async (ch, data) => console.log("[broadcast]", ch, data), onMessage: () => {} },
-  popover: { open: async (o) => console.log("[popover.open]", o.url), close: async () => console.log("[popover.close]") },
+  popover: {
+    open: async (o) => console.log("[popover.open]", o.url),
+    close: async () => console.log("[popover.close]"),
+    setHeight: async (id, height) => { document.body.style.height = `${height}px`; },
+  },
+  viewport: { getWidth: async () => 1280, getHeight: async () => 800 },
   modal: { open: async () => {}, close: async () => console.log("[modal.close]") },
   contextMenu: { create: () => {} },
 };

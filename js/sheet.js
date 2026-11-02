@@ -1,13 +1,8 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, h, syncTheme } from "./store.js";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js";
-import { useMove, describe } from "./combat.js";
-
-const TYPE_COLOR = {
-  Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
-  Fighting: "#b3332c", Poison: "#9545a0", Ground: "#c9a554", Flying: "#8e7fe0", Psychic: "#e85583", Bug: "#93a823",
-  Rock: "#ac9339", Ghost: "#6a5592", Dragon: "#6a3ef0", Dark: "#6b5546", Steel: "#9b9bb8", Fairy: "#d77fa8", Typeless: "#777",
-};
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, h, syncTheme } from "./store.js?v=0.2.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.2.0";
+import { useMove, describe } from "./combat.js?v=0.2.0";
+import { TYPE_COLOR } from "./ui.js?v=0.2.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -116,7 +111,7 @@ function moveCard(m) {
       m.damage ? h("span", {}, "Dano ", h("b", {}, m.damageText), m.stab ? h("span", { class: "muted" }, " (STAB)") : null) : null,
       h("span", { class: "spacer" }),
       h("span", { class: "row", style: "flex-wrap:nowrap;gap:4px" },
-        h("span", { class: noPP ? "no" : "" }, `PP ${m.pp}/${m.ppMax}`),
+        h("span", { class: noPP ? "no" : "" }, typeof m.pp === "number" ? `PP ${m.pp}/${m.ppMax}` : "PP ∞"),
         state.editable && typeof m.pp === "number" ? [h("button", { class: "icon", onclick: () => changePP(-1) }, "−"), h("button", { class: "icon", onclick: () => changePP(1) }, "+")] : null)),
     details);
 }

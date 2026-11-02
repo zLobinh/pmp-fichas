@@ -1,6 +1,7 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js";
-import { describe } from "./combat.js";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.2.0";
+import { describe } from "./combat.js?v=0.2.0";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.2.0";
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -21,7 +22,8 @@ function render() {
               h("span", {}, i.name || rules.name(p)),
               h("span", { class: "muted small" }, `Nv ${rules.level(p)} · HP ${p.hp.current}/${max}`),
               h("span", { class: "spacer" }),
-              h("button", { onclick: () => openSheet(i.id) }, "Ficha"));
+              h("button", { title: "Ficha rápida (HP e moves)", onclick: () => OBR.player.select([i.id], true).then(() => openHud(i.id)) }, "Rápida"),
+              h("button", { onclick: () => OBR.player.select([i.id], true).then(() => openSheet(i.id)) }, "Ficha"));
           })
         : h("div", { class: "muted small" }, "Nenhum token com ficha. Clique num token e use \"Importar ficha do PMP\".")),
     h("div", { class: "card log" },
@@ -30,6 +32,9 @@ function render() {
       state.log.length
         ? h("ul", {}, state.log.map((e) => h("li", {}, h("span", { class: "muted small" }, `${time(e.at)} · ${e.by} `), describe(e))))
         : h("div", { class: "muted small", style: "margin-top:6px" }, "Nada rolado ainda nesta cena.")),
+    h("div", { class: "card" },
+      h("h2", {}, "Minhas preferências"),
+      h("label", { class: "row small" }, h("input", { type: "checkbox", checked: autoHudEnabled(), onchange: (e) => setAutoHud(e.target.checked) }), "Abrir a ficha rápida ao selecionar um Pokémon")),
     state.role === "GM"
       ? h("div", { class: "card" },
           h("h2", {}, "Configurações da mesa"),
@@ -40,22 +45,9 @@ function render() {
       h("h2", {}, "Como usar"),
       h("div", {}, "1. No app, exporte o Pokémon (copia o código)."),
       h("div", {}, "2. Clique no token → \"Importar ficha do PMP\" → cole."),
-      h("div", {}, "3. Clique no token → \"Ficha PMP\". Selecione os alvos no mapa e clique em Usar num Move.")),
+      h("div", {}, "3. Selecione o seu Pokémon: a ficha rápida abre no canto. Clique num Move, clique nos alvos no mapa e em Rolar."),
+      h("div", {}, "4. Ficha completa: clique no token → \"Ficha PMP\" (ou ☰ na ficha rápida).")),
   ].filter(Boolean));
-}
-
-async function openSheet(itemId) {
-  await OBR.player.select([itemId], true);
-  await OBR.popover.open({
-    id: `${ID}/sheet`,
-    url: asset(`sheet.html?id=${encodeURIComponent(itemId)}`),
-    width: 400,
-    height: 620,
-    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-    anchorPosition: { left: 70, top: 70 },
-    anchorReference: "POSITION",
-    disableClickAway: true,
-  });
 }
 
 OBR.onReady(async () => {

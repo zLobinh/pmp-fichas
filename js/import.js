@@ -1,4 +1,4 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.2.0";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);

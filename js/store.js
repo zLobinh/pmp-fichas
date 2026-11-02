@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js";
+import { Rules } from "./rules.js?v=0.2.0";
 
 export { OBR };
 export const ID = "com.pmp-fichas";
@@ -9,6 +9,7 @@ export const LOG_KEY = `${ID}/log`;
 export const SETTINGS_KEY = `${ID}/settings`;
 export const LOG_CHANNEL = `${ID}/roll`;
 export const LOG_MAX = 30;
+export const HUD_ID = `${ID}/hud`;
 
 export const STATUSES = {
   Burning: "Queimado",
@@ -36,15 +37,17 @@ export async function getItem(id) {
   return (await OBR.scene.items.getItems([id]))[0] ?? null;
 }
 
-// mutate a token's sheet; fn receives the Pokémon JSON (the app's format)
+// mutate a token's sheet; fn receives the Pokémon JSON (the app's format).
+// The drafts are immer proxies (they can't be structuredClone'd), so fn edits the draft in place.
 export async function updatePokemon(id, fn) {
   await OBR.scene.items.updateItems([id], (drafts) => {
     for (const d of drafts) {
       const sheet = d.metadata[SHEET_KEY];
       if (!sheet) continue;
-      const pkmn = structuredClone(sheet.pkmn);
-      fn(pkmn);
-      d.metadata[SHEET_KEY] = { ...sheet, pkmn, updated: Date.now() };
+      sheet.pkmn.hp ??= { current: 0, max: 0 };
+      sheet.pkmn.moves ??= {};
+      fn(sheet.pkmn);
+      sheet.updated = Date.now();
     }
   });
 }

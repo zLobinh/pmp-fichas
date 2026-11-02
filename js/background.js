@@ -1,20 +1,17 @@
-// Context menu entries on tokens + notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset } from "./store.js";
-import { describe } from "./combat.js";
+// Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.2.0";
+import { describe } from "./combat.js?v=0.2.0";
+import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.2.0";
 
-const SHEET_POPOVER = `${ID}/sheet`;
+let hudOpen = false;
 
-export function openSheet(itemId, anchorElementId) {
-  return OBR.popover.open({
-    id: SHEET_POPOVER,
-    url: asset(`sheet.html?id=${encodeURIComponent(itemId)}`),
-    width: 400,
-    height: 620,
-    anchorElementId,
-    anchorOrigin: { horizontal: "RIGHT", vertical: "CENTER" },
-    transformOrigin: { horizontal: "LEFT", vertical: "CENTER" },
-    disableClickAway: true, // the player clicks targets on the map while it stays open
-  });
+async function onSelection(selection) {
+  if (hudOpen || !autoHudEnabled() || !selection || selection.length !== 1) return;
+  const [item] = await OBR.scene.items.getItems(selection);
+  const sheet = getSheet(item);
+  if (!sheet || !(await canEdit(sheet))) return;
+  hudOpen = true;
+  await openHud(item.id);
 }
 
 OBR.onReady(() => {
@@ -47,6 +44,10 @@ OBR.onReady(() => {
         height: 430,
       }),
   });
+
+  OBR.player.onChange((player) => onSelection(player.selection));
+  OBR.broadcast.onMessage(`${ID}/hud-closed`, () => { hudOpen = false; });
+  OBR.scene.onReadyChange((ready) => { if (!ready) hudOpen = false; });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
     const text = describe(data);

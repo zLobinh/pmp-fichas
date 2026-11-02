@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prévia da ficha rápida</title>
+    <!-- swaps the real Owlbear SDK for the in-memory mock -->
+    <script type="importmap">
+      { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js" } }
+    </script>
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>body { width: 330px; border-right: 1px dashed #555; border-bottom: 1px dashed #555; }</style>
+  </head>
+  <body class="hud-body">
+    <div id="root"></div>
+    <script type="module" src="../js/hud.js"></script>
+  </body>
+</html>

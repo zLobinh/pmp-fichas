@@ -1,7 +1,7 @@
 // Using a move: attack rolls / saving throws against each target, damage with type effectiveness,
 // then HP and PP changes written back to the tokens.
-import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js";
-import { d, rollDice, TYPE_PT, ATTR_PT, signed } from "./rules.js";
+import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.2.0";
+import { d, rollDice, TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.2.0";
 
 function rollDamage(dmg, crit) {
   const hits = [];

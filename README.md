@@ -6,6 +6,9 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 ## O que faz
 
 - **Importar ficha:** clique num token → *Importar ficha do PMP* → cole o código do app.
+- **Ficha rápida:** ao selecionar um Pokémon que você controla, abre no canto de baixo à esquerda um painel
+  compacto com HP e os Moves. Clique num Move → clique nos alvos no mapa → *Rolar*. Depois da rolagem o
+  atacante volta a ficar selecionado. Dá pra desligar a abertura automática no painel da extensão.
 - **Ficha PMP:** clique num token com ficha → *Ficha PMP*.
   - HP com barra, dano/cura/HP temporário, CA, proficiência, STAB, iniciativa, atributos.
   - Clique num atributo pra rolar o teste de resistência.
@@ -35,6 +38,15 @@ A ficha fica guardada no próprio token, então todo mundo vê a mesma coisa. Os
 
 Cada jogador não precisa instalar nada: a extensão ativada na sala funciona pra todos.
 
+## Publicar uma versão nova
+
+O GitHub Pages deixa o navegador guardar os arquivos por 10 minutos. Antes de subir mudanças no código,
+troque a versão (isso marca todos os scripts com `?v=`, e o navegador baixa os novos):
+
+```bash
+python tools/bump_version.py 0.2.1
+```
+
 ## Atualizar os dados do PMP
 
 Os dados (moves, Pokémon, níveis, naturezas) ficam em `data/`. Quando mudar algo no app, gere de novo e suba:
@@ -53,6 +65,7 @@ python -m http.server 8790
 
 - `http://localhost:8790/tools/test-rules.html`: confere as contas com os casos de teste do app.
 - `http://localhost:8790/tools/preview-sheet.html?id=a`: a ficha com um Owlbear de mentira (Bulbasaur atacando um Charmander).
+- `http://localhost:8790/tools/preview-hud.html?id=a`: a ficha rápida.
 - `http://localhost:8790/tools/preview-panel.html`: o painel.
 
 ## O que ainda não está nas contas
