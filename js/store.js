@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.5.2";
+import { Rules } from "./rules.js?v=0.6.0";
 
 export { OBR, SDK };
 export const ID = "com.pmp-fichas";
@@ -21,7 +21,7 @@ export const STATUSES = {
 };
 
 // set by tools/bump_version.py
-export const VERSION = "0.5.2";
+export const VERSION = "0.6.0";
 
 // absolute URL of a file of this extension (works on a GitHub Pages sub-path), tagged with the
 // version so browsers don't keep serving the previous one from their cache
@@ -55,6 +55,21 @@ export async function updatePokemon(id, fn) {
       sheet.pkmn.hp ??= { current: 0, max: 0 };
       sheet.pkmn.moves ??= {};
       fn(sheet.pkmn);
+      sheet.updated = Date.now();
+    }
+  });
+}
+
+// mutate a token's whole sheet: fn(sheet) gets { pkmn, battle, owner } and may change both
+export async function updateSheet(id, fn) {
+  await OBR.scene.items.updateItems([id], (drafts) => {
+    for (const d of drafts) {
+      const sheet = d.metadata[SHEET_KEY];
+      if (!sheet) continue;
+      sheet.pkmn.hp ??= { current: 0, max: 0 };
+      sheet.pkmn.moves ??= {};
+      sheet.battle ??= {};
+      fn(sheet);
       sheet.updated = Date.now();
     }
   });

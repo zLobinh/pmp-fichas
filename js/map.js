@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.5.2";
-import { fmtM } from "./rules.js?v=0.5.2";
-import { getRoller } from "./dice.js?v=0.5.2";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.6.0";
+import { fmtM } from "./rules.js?v=0.6.0";
+import { getRoller } from "./dice.js?v=0.6.0";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -74,14 +74,19 @@ export async function setInitiative(itemId, total) {
 }
 
 export async function rollInitiative(rules, item) {
-  const pkmn = getSheet(item).pkmn;
-  const bonus = rules.initiative(pkmn);
+  const sheet = getSheet(item);
+  const pkmn = sheet.pkmn;
+  // Velocidade: + stage x proficiency (pág. 73)
+  const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn);
   const settings = await getSettings();
   const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
-  const { nat } = await roller.d20(bonus, `${item.name || rules.name(pkmn)} iniciativa`);
-  const total = nat + bonus;
+  const { nat: natRoll } = await roller.d20(bonus, `${item.name || rules.name(pkmn)} iniciativa`);
+  const nat = natRoll;
+  // Paralisado: initiative value halved (pág. 72)
+  const paralyzed = !!(sheet.battle?.cond?.Paralyzed || pkmn.statuses?.Paralyzed);
+  const total = paralyzed ? Math.floor((nat + bonus) / 2) : nat + bonus;
   await setInitiative(item.id, total);
-  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: "Iniciativa", nat, bonus, total, roller: roller.name };
+  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: paralyzed ? "Iniciativa (paralisado, metade)" : "Iniciativa", nat, bonus, total, roller: roller.name };
   await pushLog(entry);
   return entry;
 }

@@ -1,13 +1,14 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.2";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.2";
-import { useMove } from "./combat.js?v=0.5.2";
-import { TYPE_COLOR, openSheet, die, markHudAlive } from "./ui.js?v=0.5.2";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.2";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.2";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.6.0";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.6.0";
+import { useMove, TurnError } from "./combat.js?v=0.6.0";
+import { TYPE_COLOR, openSheet, die, markHudAlive } from "./ui.js?v=0.6.0";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.6.0";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.6.0";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, moveTiming, has, chooseCost } from "./battle.js?v=0.6.0";
 
-const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
+const HELPING_HAND = "Helping Hand";
 
 const root = document.getElementById("root");
 const state = {
@@ -68,7 +69,9 @@ function hpBlock(pkmn) {
     if (!n) return amount.focus();
     await updatePokemon(state.attackerId, (p) => fn(p, n));
   };
-  const active = Object.keys(pkmn.statuses ?? {});
+  const sheet = getSheet(state.item);
+  const cond = conditionsOf(sheet);
+  const stages = Object.entries(pkmn.stages ?? {}).filter(([, v]) => v);
   return h("div", { class: "hud-hp" },
     h("div", { class: "row" },
       h("b", { class: "hud-hpnum" }, `${cur}`), h("span", { class: "muted small" }, `/ ${max} HP`),
@@ -81,15 +84,31 @@ function hpBlock(pkmn) {
       amount,
       h("button", { class: "small", onclick: apply((p, n) => { const t = Math.min(p.hp.temp ?? 0, n); p.hp.temp = (p.hp.temp ?? 0) - t; p.hp.current = Math.max(0, p.hp.current - (n - t)); }) }, "Dano"),
       h("button", { class: "small", onclick: apply((p, n) => { p.hp.current = Math.min(rules.maxHP(p), p.hp.current + n); }) }, "Curar"),
-      h("span", { class: "spacer" }),
-      active.length ? h("span", { class: "small warn" }, active.map((s) => STATUS_PT[s] ?? s).join(", ")) : null));
+      h("span", { class: "spacer" })),
+    Object.keys(cond).length || stages.length
+      ? h("div", { class: "row", style: "margin-top:4px;gap:4px" },
+          Object.entries(cond).map(([k, v]) => h("span", { class: "chip cond", title: condTip(k, v) }, `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`)),
+          stages.map(([k, v]) => h("span", { class: `chip ${v > 0 ? "up" : "down"}` }, `${STAGE_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`)))
+      : null);
+}
+
+function condTip(key, v) {
+  if (key === "Confused") return `Confuso: mais ${v.left ?? "?"} turno(s)`;
+  if (key === "BadlyPoisoned") return `Gravemente Envenenado: próximo dano ×${v.count ?? 1}`;
+  if (key === "Asleep") return `Dormindo há ${v.age ?? 0} turno(s)`;
+  if (key === "Frozen") return `Congelado há ${v.age ?? 0} turno(s)`;
+  if (key === "Drowsy") return v.blocked ? "Sonolento: não usa Moves neste turno" : "Sonolento";
+  return CONDITIONS[key]?.label ?? key;
 }
 
 function initiativeBlock(pkmn) {
   const init = initiativeOf(state.item);
+  const econ = econOf(getSheet(state.item));
+  const slot = (key, label) => h("span", { class: `slot ${econ[key] ? "on" : "off"}`, title: econ[key] ? `${label} disponível` : `${label} já usada` }, label);
   return h("div", { class: `row hud-init ${init?.active ? "turn" : ""}` },
     init?.active ? h("b", { class: "turn-tag" }, "▶ SUA VEZ") : null,
-    h("span", { class: "muted small" }, init ? `Iniciativa ${init.count}` : "Fora da iniciativa"),
+    h("span", { class: "muted small" }, init ? `Init ${init.count}` : "Fora da iniciativa"),
+    inInitiative(state.item) ? [slot("action", "Ação"), slot("bonus", "Bônus"), slot("reaction", "Reação")] : null,
     h("span", { class: "spacer" }),
     h("button", {
       class: "small",
@@ -102,7 +121,14 @@ function initiativeBlock(pkmn) {
         catch (e) { OBR.notification.show(e.message, "ERROR"); }
         finally { state.busy = false; render(); }
       },
-    }, `🎲 Iniciativa ${signed(state.rules.initiative(pkmn))}`));
+    }, `🎲 ${signed(state.rules.initiative(pkmn))}`));
+}
+
+// "A" action, "B" bonus action, "R" reaction: what the move can spend
+function timingTag(name) {
+  const t = moveTiming(state.rules.moves[name] ?? {});
+  const tags = [t.action || t.both ? "A" : null, t.bonus ? "B" : null, t.reaction ? "R" : null].filter(Boolean);
+  return h("span", { class: "tt", title: state.rules.moves[name]?.["Move Time"] ?? "" }, tags.join("/") || "A");
 }
 
 function moveRow(m) {
@@ -123,6 +149,17 @@ function moveRow(m) {
       state.pending = m.name;
       state.outOfRange = null;
       if (m.rangeInfo.kind === "area") {
+        // turn/action check first, so nobody aims for nothing
+        try {
+          const running = (await OBR.scene.items.getItems((i) => i.metadata?.["com.pretty-initiative/metadata"]?.active === true)).length > 0;
+          chooseCost(state.item, state.rules.moves[m.name] ?? {}, running);
+          state.forceArea = false;
+        } catch (e) {
+          if (!(e instanceof TurnError)) throw e;
+          if (!state.isGM) { OBR.notification.show(e.message, "WARNING"); state.pending = null; return render(); }
+          OBR.notification.show(`${e.message} (mestre: vai mesmo assim)`, "WARNING");
+          state.forceArea = true;
+        }
         // the template appears on the map; whoever is inside when the player clicks gets hit
         state.mode = "aim";
         state.targets = [];
@@ -139,16 +176,58 @@ function moveRow(m) {
         }
         return;
       }
+      if (m.rangeInfo.kind === "self") {
+        // "Pessoal" (Swords Dance, Agility...): no targets to pick
+        state.mode = "self";
+        state.targets = [];
+        state.turnError = null;
+        await roll(true);
+        return;
+      }
       state.mode = "target";
+      state.turnError = null;
       const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
       state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
       await updateRanges();
+      await findHelpers(m);
       render();
     },
   },
-    h("span", { class: "hud-move-name" }, m.label.replace(/ PMP$/, "")),
+    h("span", { class: "hud-move-name" }, timingTag(m.name), " ", m.label.replace(/ PMP$/, "")),
     h("span", { class: "hud-move-nums" }, nums || "sem rolagem"),
     h("span", { class: `hud-move-pp ${noPP ? "no" : ""}` }, typeof m.pp === "number" ? `${m.pp}/${m.ppMax}` : "∞"));
+}
+
+// allies this player controls that can use Helping Hand on this attack (reaction, 18 m)
+async function findHelpers(m) {
+  state.helperCands = [];
+  state.helpers = new Set();
+  if (m.attackBonus == null && !m.damage) return;
+  const items = await OBR.scene.items.getItems((i) => i.metadata?.["com.pmp-fichas/sheet"]?.pkmn?.moves?.[HELPING_HAND] && i.id !== state.attackerId);
+  for (const it of items) {
+    const s = getSheet(it);
+    if (!(await canEdit(s))) continue;
+    const pp = state.rules.movePP(s.pkmn, HELPING_HAND);
+    let reason = "";
+    if (s.pkmn.hp.current <= 0) reason = "desmaiado";
+    else if (typeof pp === "number" && pp <= 0) reason = "sem PP";
+    else if (inInitiative(it) && !econOf(s).reaction) reason = "reação já usada";
+    else if (has(s, "Confused") || has(s, "Asleep") || has(s, "Frozen") || has(s, "Stunned")) reason = "não pode reagir";
+    else if ((await distanceMeters(it, state.item)) > 18.05) reason = "longe (mais de 18 m)";
+    state.helperCands.push({ item: it, reason });
+  }
+}
+
+function helpersRow() {
+  if (!state.helperCands?.length) return null;
+  return h("div", { class: "row small", style: "margin:2px 0 4px;gap:4px" },
+    h("span", { class: "muted" }, "Helping Hand:"),
+    state.helperCands.map(({ item, reason }) => h("span", {
+      class: `chip ${state.helpers.has(item.id) ? "on" : ""} ${reason ? "far" : ""}`,
+      style: reason ? "opacity:.6" : "cursor:pointer",
+      title: reason || "Gasta a reação deste Pokémon: +1d6 no acerto e mais dados de dano",
+      onclick: reason ? null : () => { state.helpers.has(item.id) ? state.helpers.delete(item.id) : state.helpers.add(item.id); render(); },
+    }, `🤝 ${item.name}${reason ? ` (${reason})` : ""}`)));
 }
 
 function targetBar() {
@@ -170,13 +249,19 @@ function targetBar() {
               r ? (r.ok ? " ✓" : " ✗") : "");
           })
         : h("span", { class: "muted small" }, "Nenhum alvo: rola só o dano.")),
+    helpersRow(),
     state.outOfRange
       ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.outOfRange.message)
       : null,
+    state.turnError
+      ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.turnError)
+      : null,
     h("div", { class: "row" },
-      state.outOfRange
-        ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true) }, "Rolar mesmo assim")
-        : h("button", { class: "primary", disabled: state.busy, onclick: () => roll(false) }, state.busy ? "Rolando…" : "Rolar"),
+      state.turnError && state.isGM
+        ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true, false, true) }, "Usar mesmo assim (mestre)")
+        : state.outOfRange
+          ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true) }, "Rolar mesmo assim")
+          : h("button", { class: "primary", disabled: state.busy || (state.turnError && !state.isGM), onclick: () => roll(false) }, state.busy ? "Rolando…" : "Rolar"),
       h("button", { onclick: cancel }, "Cancelar")));
 }
 
@@ -200,9 +285,10 @@ function buildResult(e) {
       h("span", {}, `${e.label}: `, h("b", {}, e.total), h("span", { class: "muted" }, ` (${e.nat}${signed(e.bonus)})`)));
   }
   return h("div", { class: "hud-result" },
-    h("div", { class: "muted small" }, e.move),
+    h("div", { class: "muted small" }, [e.move, e.cost, ...(e.notes ?? [])].filter(Boolean).join(" · ")),
+    e.checks?.length ? h("div", { class: "row small", style: "gap:4px" }, e.checks.map((c) => h("span", { class: c.failed ? "no" : "ok" }, `${c.label}: ${c.nat}`))) : null,
     e.results.map((r) => {
-      if (!r.target) return h("div", {}, r.note);
+      if (!r.target) return h("div", { class: e.failed ? "no" : "" }, r.note);
       const bits = [];
       if (r.attack) bits.push(die(r.attack.nat, { animate, kind: r.attack.crit ? "crit" : r.attack.fumble ? "fumble" : "" }));
       else if (r.save && !r.save.unknown) bits.push(die(r.save.nat, { animate }));
@@ -210,10 +296,12 @@ function buildResult(e) {
       if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null ? ` vs ${r.attack.ac}` : ""}) `);
       if (r.save && !r.save.unknown) bits.push(h("span", { class: r.save.success ? "no" : "ok" }, `${r.save.effectOnly ? "efeito: " : ""}TR ${r.save.total} vs ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
       if (r.save?.unknown) bits.push(`TR ${r.save.attr} CD ${r.save.dc} `);
+      if (r.contest) bits.push(h("span", { class: r.contest.success ? "ok" : "no" }, r.contest.auto ? "acerto automático " : `${r.contest.total} vs ${r.contest.vs} ${r.contest.success ? "pegou" : "resistiu"} `));
       if (r.damage) {
         bits.push(h("b", {}, `${r.damage.final} dano`), r.damage.effLabel ? ` ${r.damage.effLabel}` : "");
       }
       if (r.hpAfter) bits.push(h("span", { class: "muted" }, ` → ${r.hpAfter}`));
+      if (r.effects?.length) bits.push(h("span", { class: "warn" }, ` · ${r.effects.join(", ")}`));
       const dmgDice = r.damage?.dice.flat().length
         ? h("div", { class: "dice-row" }, r.damage.dice.flat().map((v) => die(v, { sides: r.damage.sides ?? 6, animate })),
             r.damage.bonus ? h("span", { class: "muted small" }, signed(r.damage.bonus)) : null)
@@ -228,7 +316,7 @@ async function onAim(s) {
   if (s.status === "done") {
     state.aimNonce = null;
     state.targets = s.targetIds.length ? await OBR.scene.items.getItems(s.targetIds) : [];
-    await roll(true, true);
+    await roll(true, true, !!state.forceArea);
   } else if (s.status === "cancel") {
     state.aimNonce = null;
     Object.assign(state, { mode: "idle", pending: null, targets: [] });
@@ -246,18 +334,23 @@ function aimBar() {
       h("button", { disabled: state.busy, onclick: () => OBR.broadcast.sendMessage(AIM_ABORT, {}, { destination: "LOCAL" }) }, "Cancelar")));
 }
 
-async function roll(ignoreRange, area = false) {
+async function roll(ignoreRange, area = false, force = false) {
   state.busy = true;
   render();
   try {
     state.item = await getItem(state.attackerId);
-    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area });
+    const helpers = state.helperCands?.filter((c) => state.helpers?.has(c.item.id)).map((c) => c.item) ?? [];
+    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers });
     state.last._fresh = state.last.roller !== "Dice+";
-    Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null });
+    Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, helperCands: [], helpers: new Set() });
     await OBR.player.select([state.attackerId], true); // back to the attacker
   } catch (e) {
     if (e instanceof OutOfRange) state.outOfRange = e;
-    else {
+    else if (e instanceof TurnError) {
+      // out of turn / action already used: players are blocked, the GM may force it
+      state.turnError = e.message;
+      if (state.mode !== "target") { OBR.notification.show(e.message, "WARNING"); if (!state.isGM) Object.assign(state, { mode: "idle", pending: null }); else state.mode = "target"; }
+    } else {
       OBR.notification.show(e.message, "ERROR");
       Object.assign(state, { mode: "idle", pending: null, targets: [] });
     }
@@ -315,6 +408,7 @@ function fit() {
 OBR.onReady(async () => {
   syncTheme();
   state.rules = await loadRules();
+  state.isGM = (await OBR.player.getRole()) === "GM";
   await setAttacker(state.attackerId);
   render();
   OBR.scene.items.onChange(async (items) => {

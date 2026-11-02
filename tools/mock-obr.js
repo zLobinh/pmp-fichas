@@ -54,8 +54,10 @@ const OBR = {
       updateItems: async (ids, fn) => {
         // like the real SDK (immer), drafts are proxies: structuredClone on them throws
         const wrap = (o) => new Proxy(o, { get: (t, k) => (t[k] && typeof t[k] === "object" ? wrap(t[k]) : t[k]) });
-        const drafts = items.filter((i) => ids.includes(i.id)).map(wrap);
-        fn(drafts);
+        const targets = items.filter((i) => ids.includes(i.id));
+        fn(targets.map(wrap));
+        // like immer finalizing: drafts assigned inside drafts become plain data again
+        for (const t of targets) { const plain = JSON.parse(JSON.stringify(t)); for (const k of Object.keys(t)) delete t[k]; Object.assign(t, plain); }
         emit("items", clone(items));
       },
       onChange: (f) => listeners.items.push(f),

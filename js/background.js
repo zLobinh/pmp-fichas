@@ -1,9 +1,11 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.5.2";
-import { describe } from "./combat.js?v=0.5.2";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.5.2";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.5.2";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.5.2";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.6.0";
+import { describe } from "./combat.js?v=0.6.0";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.6.0";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.6.0";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.6.0";
+import { watchTurns, watchMarks } from "./battle.js?v=0.6.0";
+import { loadRules } from "./store.js?v=0.6.0";
 
 let lastSelection = "";
 
@@ -75,6 +77,17 @@ OBR.onReady(() => {
     });
   });
   OBR.broadcast.onMessage(AIM_ABORT, () => { abortAim().catch(() => {}); });
+
+  // turn start/end effects and token marks run on ONE browser: the GM's
+  OBR.player.getRole().then(async (role) => {
+    if (role !== "GM") return;
+    const rules = await loadRules();
+    const start = () => { watchTurns(rules); watchMarks(rules); };
+    if (await OBR.scene.isReady()) start();
+    else {
+      const off = OBR.scene.onReadyChange((ready) => { if (ready) { off(); start(); } });
+    }
+  });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
     const text = describe(data);

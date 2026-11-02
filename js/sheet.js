@@ -1,11 +1,13 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.5.2";
-import { getRoller } from "./dice.js?v=0.5.2";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.2";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.5.2";
-import { useMove, describe } from "./combat.js?v=0.5.2";
-import { TYPE_COLOR, die } from "./ui.js?v=0.5.2";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.2";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.6.0";
+import { getRoller } from "./dice.js?v=0.6.0";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.6.0";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage } from "./battle.js?v=0.6.0";
+import { TurnError } from "./combat.js?v=0.6.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.6.0";
+import { useMove, describe } from "./combat.js?v=0.6.0";
+import { TYPE_COLOR, die } from "./ui.js?v=0.6.0";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.6.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -72,19 +74,44 @@ function statsCard(pkmn) {
 
 function infoCard(pkmn) {
   const { rules } = state;
-  const sts = pkmn.statuses ?? {};
+  const cond = conditionsOf(getSheet(state.item));
+  // manual toggle (the GM's call): ignores immunities and the "período de carência"
+  const toggle = (k) => updateSheet(itemId, (s) => {
+    s.battle.cond = conditionsOf(s);
+    if (s.battle.cond[k]) clearCondition(s, k, { grace: false });
+    else {
+      const res = giveCondition(s, k, rules);
+      if (!res.ok) { s.battle.cond[k] = { since: s.battle.turns ?? 0, age: 0, left: k === "Confused" ? 3 : undefined, count: k === "BadlyPoisoned" ? 1 : undefined }; }
+    }
+  });
   return h("div", { class: "card" },
     h("div", { class: "row" }, rules.types(pkmn).map(typeTag),
       h("span", { class: "muted small" }, `Natureza: ${pkmn.nature ?? "—"}`)),
     h("div", { class: "small", style: "margin-top:6px" }, h("span", { class: "muted" }, "Habilidades: "), rules.abilities(pkmn).join(", ") || "—"),
     pkmn.item ? h("div", { class: "small" }, h("span", { class: "muted" }, "Item: "), pkmn.item) : null,
-    h("div", { class: "row", style: "margin-top:6px" },
-      Object.entries(STATUSES).map(([k, label]) =>
+    h("h2", { style: "margin-top:8px" }, "Condições de status"),
+    h("div", { class: "row" },
+      Object.entries(CONDITIONS).map(([k, c]) =>
         h("span", {
-          class: `chip status ${sts[k] ? "on" : ""}`,
+          class: `chip status ${cond[k] ? "on" : ""}`,
           title: state.editable ? "Clique pra ligar/desligar" : "",
-          onclick: state.editable ? () => updatePokemon(itemId, (p) => { p.statuses ??= {}; if (p.statuses[k]) delete p.statuses[k]; else p.statuses[k] = true; }) : null,
-        }, label))));
+          onclick: state.editable ? () => toggle(k) : null,
+        }, `${c.icon} ${c.label}`))));
+}
+
+function stagesCard(pkmn) {
+  const change = (k, delta) => updateSheet(itemId, (s) => addStage(s.pkmn, k, delta));
+  return h("div", { class: "card" },
+    h("div", { class: "row" }, h("h2", { style: "margin:0" }, "Mudanças de status (estágios)"), h("span", { class: "spacer" }),
+      state.editable && Object.keys(pkmn.stages ?? {}).length ? h("button", { class: "small", onclick: () => updateSheet(itemId, (s) => { s.pkmn.stages = {}; }) }, "Zerar") : null),
+    h("div", { class: "stage-grid", style: "margin-top:6px" },
+      Object.entries(STAGES).map(([k, label]) => {
+        const v = stage(pkmn, k);
+        return h("div", { class: "stage", title: label },
+          h("span", { class: "muted" }, STAGE_SHORT[k]),
+          h("b", { class: v > 0 ? "ok" : v < 0 ? "no" : "" }, v > 0 ? `+${v}` : `${v}`),
+          state.editable ? h("div", {}, h("button", { onclick: () => change(k, -1) }, "−"), h("button", { onclick: () => change(k, 1) }, "+")) : null);
+      })));
 }
 
 function targetsCard() {
@@ -115,7 +142,7 @@ function moveCard(m) {
   return h("div", { class: "move", style: `border-left-color:${color}` },
     h("div", { class: "row" },
       h("span", { class: "title" }, m.label), typeTag(m.type), h("span", { class: "spacer" }),
-      state.editable ? h("button", { class: "primary", disabled: noPP || state.busy, onclick: () => doMove(m.name, state.forceMove === m.name) }, state.forceMove === m.name ? "Usar mesmo assim" : "Usar") : null),
+      state.editable ? h("button", { class: "primary", disabled: noPP || state.busy, onclick: () => doMove(m.name, state.forceMove === m.name, undefined, state.forceMove === m.name && state.isGM) }, state.forceMove === m.name ? "Usar mesmo assim" : "Usar") : null),
     h("div", { class: "meta" }, [m.time, m.range, m.duration].filter(Boolean).join(" · ")),
     state.forceMove === m.name && state.rangeMsg ? h("div", { class: "no small" }, state.rangeMsg) : null,
     h("div", { class: "nums" },
@@ -166,7 +193,7 @@ async function rollCheck(label, bonus) {
   await pushLog(entry);
 }
 
-async function doMove(name, ignoreRange, areaTargets) {
+async function doMove(name, ignoreRange, areaTargets, force = false) {
   const m = state.rules.moveData(getSheet(state.item).pkmn, name);
   if (m.rangeInfo.kind === "area" && !areaTargets) {
     state.aiming = null;
@@ -183,7 +210,7 @@ async function doMove(name, ignoreRange, areaTargets) {
   try {
     if (areaTargets) state.targets = areaTargets;
     else await refreshTargets();
-    state.last = await useMove(state.rules, state.item, name, state.targets, { ignoreRange, area: !!areaTargets });
+    state.last = await useMove(state.rules, state.item, name, state.targets, { ignoreRange, area: !!areaTargets, force });
     state.last._fresh = state.last.roller !== "Dice+";
     state.forceMove = null;
     state.rangeMsg = null;
@@ -191,6 +218,10 @@ async function doMove(name, ignoreRange, areaTargets) {
     if (e instanceof OutOfRange) {
       state.forceMove = name;
       state.rangeMsg = e.message;
+    } else if (e instanceof TurnError) {
+      // players are blocked out of turn; the GM can force it
+      if (state.isGM) { state.forceMove = name; state.rangeMsg = `${e.message} (mestre: pode forçar)`; }
+      else OBR.notification.show(e.message, "WARNING");
     } else OBR.notification.show(e.message, "ERROR");
   } finally {
     state.busy = false;
@@ -209,7 +240,9 @@ function footer(pkmn) {
           p.hp.temp = 0;
           for (const n of Object.keys(p.moves ?? {})) p.moves[n].pp = rules.moveMaxPP(p, n);
           p.statuses = {};
+          p.stages = {};
         });
+        await updateSheet(itemId, (s) => { s.battle = {}; });
         await pushLog({ kind: "note", attacker: state.item.name, text: "fez um descanso longo" });
       },
     }, "Descansar") : null,
@@ -267,6 +300,7 @@ function render() {
     hpCard(pkmn),
     statsCard(pkmn),
     infoCard(pkmn),
+    stagesCard(pkmn),
     targetsCard(),
     lastResult(),
     h("div", { class: "card" }, h("h2", {}, "Moves"), rules.moveList(pkmn).map(moveCard)),
@@ -282,6 +316,7 @@ OBR.onReady(async () => {
   state.rules = await loadRules();
   state.item = await getItem(itemId);
   state.editable = await canEdit(getSheet(state.item));
+  state.isGM = (await OBR.player.getRole()) === "GM";
   await refreshTargets();
   render();
   OBR.scene.items.onChange(async (items) => {

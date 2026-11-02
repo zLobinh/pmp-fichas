@@ -1,9 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.5.2";
-import { describe } from "./combat.js?v=0.5.2";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.5.2";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.5.2";
-import { dicePlusReady } from "./dice.js?v=0.5.2";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.6.0";
+import { describe } from "./combat.js?v=0.6.0";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.6.0";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.6.0";
+import { dicePlusReady } from "./dice.js?v=0.6.0";
+import { endCombat } from "./battle.js?v=0.6.0";
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -60,6 +61,19 @@ function render() {
                   OBR.notification.show(`Iniciativa rolada pra ${withSheet.length} Pokémon.`, "SUCCESS");
                 },
               }, "🎲 Rolar iniciativa de todos")
+            : null,
+          withSheet.length
+            ? h("button", {
+                style: "margin-top:6px;margin-left:6px",
+                title: "Zera estágios e ações, acaba Confuso/Atordoado/Encantado/Sonolento e Gravemente Envenenado vira Envenenado",
+                onclick: async (ev) => {
+                  ev.target.disabled = true;
+                  await endCombat(withSheet);
+                  await OBR.scene.setMetadata({ "com.pmp-fichas/turn": null });
+                  ev.target.disabled = false;
+                  OBR.notification.show("Combate encerrado: estágios zerados e condições voláteis removidas.", "SUCCESS");
+                },
+              }, "🏁 Encerrar combate")
             : null)
       : null,
     h("div", { class: "card small muted" },

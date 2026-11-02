@@ -38,7 +38,30 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Dados na tela:** o d20 e os dados de dano giram e caem no resultado (crítico dourado, 1 natural vermelho).
 - **Animação no mapa:** linha do atacante até cada alvo, anel e número do dano (vermelho = acertou, dourado = crítico,
   cinza tracejado = errou). Todo mundo na sala vê.
-- **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre.
+- **Ações (Livro de Regras, pág. 47-49):** com o Pretty Sordid rodando, cada Pokémon tem Ação, Ação Bônus e Reação
+  (aparecem na ficha rápida). Ação e Bônus voltam a cada rodada; a Reação volta no início do turno do próprio Pokémon.
+  Fora do turno só dá pra usar Moves de reação (ex.: Quick Attack, Protect, Counter); Moves "ação / reação" usados
+  como reação tiram a ação do próximo turno quando o Move diz isso. O mestre pode forçar ("Usar mesmo assim").
+  Sem ninguém ativo no Pretty Sordid, nada é cobrado (jogo livre).
+- **Condições de status (pág. 72):** Queimado, Congelado, Paralisado, Envenenado, Gravemente Envenenado, Sonolento,
+  Dormindo, Atordoado, Confuso e Encantado, com imunidade por tipo, um status não-volátil por vez e Período de
+  Carência. No fim do turno (no navegador do mestre): dano de Queimado/Envenenado/Gravemente Envenenado (prof. ×
+  turnos seguidos), d6 pra acordar e pra descongelar, contagem da Confusão. Ao usar um Move: d4 da Paralisia, d6 da
+  Confusão (com dano em si mesmo), d4 do Encanto. Desvantagem em TR conforme a condição, vantagem em ataques contra
+  alvo incapacitado. Crítico acorda; dano de Fogo descongela.
+- **Estágios (pág. 73):** Ataque/Ataque Especial somam prof. × estágio no dano (corpo a corpo / à distância),
+  Defesa/Defesa Especial reduzem o dano recebido, Precisão soma no acerto e na CD, Evasão na CA e nos TRs,
+  Velocidade na iniciativa, Margem de Crítico +3 por estágio. Crítico ignora estágios negativos do atacante e
+  positivos do defensor. 20 natural no TR = sem dano; 1 natural = crítico.
+- **Moves de status:** o texto do Move é lido pra aplicar sozinho estágios (Swords Dance, Growl, Charm...),
+  condições por disputa (Toxic, Thunder Wave, Will-O-Wisp: "1d20 + MOVE + X contra 10 + atributo"), efeitos
+  secundários ("resultado natural de 19 ou 20... fica queimado") e efeitos de TR falho (Nuzzle, Acid Spray).
+  Cerca de 350 dos 838 Moves têm efeito automático; o resto mostra a descrição e o mestre aplica na ficha completa.
+- **Helping Hand:** ao escolher os alvos de um ataque, aparecem seus Pokémon com Helping Hand, reação livre e a até
+  18 m. Marcando, eles gastam a reação e 1 PP: +1d6 no acerto e metade a mais de dados de dano (1 dado: rola 2x).
+- **Token:** fica cinza quando desmaia e mostra uma etiqueta com as condições ativas.
+- **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre,
+  incluindo *Encerrar combate* (zera estágios e ações, tira condições voláteis, Gravemente Envenenado vira Envenenado).
 - Todo mundo na sala recebe uma notificação de cada rolagem.
 
 A ficha fica guardada no próprio token, então todo mundo vê a mesma coisa. Os jogadores só editam as fichas que eles importaram; o mestre edita todas.

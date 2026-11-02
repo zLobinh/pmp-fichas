@@ -147,3 +147,16 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .hud-init.turn { outline: 2px solid var(--good); }
 .turn-tag { color: var(--good); font-size: 12px; }
 .chip.far { border-color: var(--bad); color: var(--bad); }
+
+/* ---------- ações, condições e estágios ---------- */
+.slot { font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); }
+.slot.on { color: var(--good); border-color: var(--good); }
+.slot.off { color: var(--muted); text-decoration: line-through; opacity: .7; }
+.tt { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--panel-2); color: var(--muted); vertical-align: middle; }
+.chip.cond { border-color: var(--warn); }
+.chip.up { border-color: var(--good); color: var(--good); }
+.chip.down { border-color: var(--bad); color: var(--bad); }
+.stage-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.stage-grid .stage { background: var(--panel-2); border-radius: 6px; padding: 3px 4px; text-align: center; font-size: 11px; }
+.stage-grid .stage b { display: block; font-size: 13px; }
+.stage-grid .stage button { padding: 0 6px; font-size: 11px; }
