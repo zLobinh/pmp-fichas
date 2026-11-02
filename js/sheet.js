@@ -1,14 +1,15 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, h, syncTheme } from "./store.js?v=0.2.0";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.2.0";
-import { useMove, describe } from "./combat.js?v=0.2.0";
-import { TYPE_COLOR } from "./ui.js?v=0.2.0";
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, h, syncTheme } from "./store.js?v=0.3.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.3.0";
+import { useMove, describe } from "./combat.js?v=0.3.0";
+import { TYPE_COLOR, die } from "./ui.js?v=0.3.0";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.3.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
 const itemId = new URLSearchParams(location.search).get("id");
 const root = document.getElementById("root");
-const state = { rules: null, item: null, targets: [], editable: false, openDetails: new Set(), last: null, busy: false };
+const state = { rules: null, item: null, targets: [], editable: false, openDetails: new Set(), last: null, busy: false, forceMove: null, rangeMsg: null };
 
 async function refreshTargets(selection) {
   const ids = (selection ?? (await OBR.player.getSelection()) ?? []).filter((id) => id !== itemId);
@@ -50,8 +51,17 @@ function statsCard(pkmn) {
       h("div", {}, h("b", {}, rules.ac(pkmn)), h("span", { class: "muted small" }, "CA")),
       h("div", {}, h("b", {}, signed(rules.proficiency(pkmn))), h("span", { class: "muted small" }, "Prof.")),
       h("div", {}, h("b", {}, signed(rules.stabBonus(pkmn))), h("span", { class: "muted small" }, "STAB")),
-      h("div", {}, h("b", {}, signed(modOf(attrs.DEX))), h("span", { class: "muted small" }, "Inic.")),
-      sp?.WSp ? h("div", {}, h("b", {}, `${sp.WSp}`), h("span", { class: "muted small" }, "Desl.")) : null),
+      h("div", {}, h("b", {}, signed(rules.initiative(pkmn))), h("span", { class: "muted small" }, "Inic.")),
+      sp?.WSp ? h("div", {}, h("b", {}, `${sp.WSp}`), h("span", { class: "muted small" }, "Desl.")) : null,
+      h("span", { class: "spacer" }),
+      state.editable ? h("button", {
+        title: "Rola d20 + iniciativa e coloca no Pretty Sordid",
+        disabled: state.busy,
+        onclick: async () => {
+          try { state.last = await rollInitiative(rules, state.item); state.last._fresh = true; render(); }
+          catch (e) { OBR.notification.show(e.message, "ERROR"); }
+        },
+      }, initiativeOf(state.item) ? `🎲 Iniciativa (${initiativeOf(state.item).count})` : "🎲 Iniciativa") : null),
     h("div", { class: "stats", style: "margin-top:8px" },
       ATTRS.map((k) => h("div", { class: "stat", title: `Teste de resistência ${signed(saves[k])}`, style: "cursor:pointer", onclick: () => rollCheck(`TR ${ATTR_PT[k]}`, saves[k]) },
         h("span", {}, ATTR_PT[k]), h("b", {}, attrs[k]), h("span", {}, signed(modOf(attrs[k])))))),
@@ -103,8 +113,9 @@ function moveCard(m) {
   return h("div", { class: "move", style: `border-left-color:${color}` },
     h("div", { class: "row" },
       h("span", { class: "title" }, m.label), typeTag(m.type), h("span", { class: "spacer" }),
-      state.editable ? h("button", { class: "primary", disabled: noPP || state.busy, onclick: () => doMove(m.name) }, "Usar") : null),
+      state.editable ? h("button", { class: "primary", disabled: noPP || state.busy, onclick: () => doMove(m.name, state.forceMove === m.name) }, state.forceMove === m.name ? "Usar mesmo assim" : "Usar") : null),
     h("div", { class: "meta" }, [m.time, m.range, m.duration].filter(Boolean).join(" · ")),
+    state.forceMove === m.name && state.rangeMsg ? h("div", { class: "no small" }, state.rangeMsg) : null,
     h("div", { class: "nums" },
       m.attackBonus != null ? h("span", {}, "Acerto ", h("b", {}, signed(m.attackBonus))) : null,
       m.saveDC != null ? h("span", {}, "CD ", h("b", {}, m.saveDC), ` (${ATTR_PT[m.save] ?? m.save})`) : null,
@@ -116,37 +127,55 @@ function moveCard(m) {
     details);
 }
 
+// kept between renders so the dice animation isn't cut off by HP/PP updates
+let resultCache = { entry: null, node: null };
 function lastResult() {
   if (!state.last) return null;
-  const e = state.last;
+  if (resultCache.entry !== state.last) resultCache = { entry: state.last, node: buildResult(state.last) };
+  return resultCache.node;
+}
+
+function buildResult(e) {
+  const animate = e._fresh === true;
+  e._fresh = false;
+  if (e.kind === "check") {
+    return h("div", { class: "result row" }, die(e.nat, { animate, kind: e.nat === 20 ? "crit" : e.nat === 1 ? "fumble" : "" }), describe(e));
+  }
   const lines = (e.results ?? []).map((r) => {
     if (!r.target) return h("div", {}, r.note);
-    const bits = [h("b", {}, r.target), ": "];
+    const nat = r.attack?.nat ?? (r.save && !r.save.unknown ? r.save.nat : null);
+    const bits = [nat != null ? die(nat, { animate, kind: r.attack?.crit ? "crit" : r.attack?.fumble ? "fumble" : "" }) : null, " ", h("b", {}, r.target), ": "];
     if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (d20 ${r.attack.nat} → ${r.attack.total}${r.attack.ac != null ? ` vs CA ${r.attack.ac}` : ""}) `);
     if (r.save) bits.push(r.save.effectOnly ? "efeito secundário: " : "", r.save.unknown ? `TR ${r.save.attr} CD ${r.save.dc} (alvo sem ficha, role na mesa) ` : h("span", { class: r.save.success ? "no" : "ok" }, `TR ${r.save.attr} ${r.save.total} vs CD ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
     if (r.damage) bits.push(h("b", {}, `${r.damage.final} de dano`), ` [${r.damage.dice.map((x) => x.join("+")).join(" | ")}]${r.damage.effLabel ? ` ${r.damage.effLabel}` : ""}${r.damage.half ? " (metade)" : ""}`);
     if (r.hpAfter) bits.push(` → HP ${r.hpAfter}`);
     return h("div", {}, bits);
   });
-  return h("div", { class: "result" }, e.kind === "move" ? h("div", { class: "muted small" }, `${e.move}${e.pp ? ` · PP ${e.pp}` : ""}`) : null, e.kind === "check" ? describe(e) : lines);
+  return h("div", { class: "result" }, h("div", { class: "muted small" }, `${e.move}${e.pp ? ` · PP ${e.pp}` : ""}`), lines);
 }
 
 async function rollCheck(label, bonus) {
   const nat = d(20);
-  const entry = { kind: "check", attacker: state.item.name, label, nat, bonus, total: nat + bonus };
+  const entry = { kind: "check", attacker: state.item.name, label, nat, bonus, total: nat + bonus, _fresh: true };
   state.last = entry;
   render();
   await pushLog(entry);
 }
 
-async function doMove(name) {
+async function doMove(name, ignoreRange) {
   state.busy = true;
   render();
   try {
     await refreshTargets();
-    state.last = await useMove(state.rules, state.item, name, state.targets);
+    state.last = await useMove(state.rules, state.item, name, state.targets, { ignoreRange });
+    state.last._fresh = true;
+    state.forceMove = null;
+    state.rangeMsg = null;
   } catch (e) {
-    OBR.notification.show(e.message, "ERROR");
+    if (e instanceof OutOfRange) {
+      state.forceMove = name;
+      state.rangeMsg = e.message;
+    } else OBR.notification.show(e.message, "ERROR");
   } finally {
     state.busy = false;
     render();

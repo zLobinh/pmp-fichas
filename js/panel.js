@@ -1,7 +1,8 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.2.0";
-import { describe } from "./combat.js?v=0.2.0";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.2.0";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.3.0";
+import { describe } from "./combat.js?v=0.3.0";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.3.0";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.3.0";
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -18,9 +19,10 @@ function render() {
         ? withSheet.map((i) => {
             const p = getSheet(i).pkmn;
             const max = rules.maxHP(p);
+            const init = initiativeOf(i);
             return h("div", { class: "row", style: "margin:3px 0" },
-              h("span", {}, i.name || rules.name(p)),
-              h("span", { class: "muted small" }, `Nv ${rules.level(p)} · HP ${p.hp.current}/${max}`),
+              h("span", { class: init?.active ? "ok" : "" }, `${init?.active ? "▶ " : ""}${i.name || rules.name(p)}`),
+              h("span", { class: "muted small" }, `Nv ${rules.level(p)} · HP ${p.hp.current}/${max}${init ? ` · Init ${init.count}` : ""}`),
               h("span", { class: "spacer" }),
               h("button", { title: "Ficha rápida (HP e moves)", onclick: () => OBR.player.select([i.id], true).then(() => openHud(i.id)) }, "Rápida"),
               h("button", { onclick: () => OBR.player.select([i.id], true).then(() => openSheet(i.id)) }, "Ficha"));
@@ -39,7 +41,21 @@ function render() {
       ? h("div", { class: "card" },
           h("h2", {}, "Configurações da mesa"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoDamage, onchange: (e) => setSettings({ autoDamage: e.target.checked }) }), "Descontar o dano do HP do alvo automaticamente"),
-          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoPP, onchange: (e) => setSettings({ autoPP: e.target.checked }) }), "Gastar 1 PP ao usar um Move"))
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoPP, onchange: (e) => setSettings({ autoPP: e.target.checked }) }), "Gastar 1 PP ao usar um Move"),
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.checkRange, onchange: (e) => setSettings({ checkRange: e.target.checked }) }), "Exigir que o alvo esteja no alcance do Move"),
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.mapFx, onchange: (e) => setSettings({ mapFx: e.target.checked }) }), "Animação no mapa (quem acertou quem)"),
+          withSheet.length
+            ? h("button", {
+                style: "margin-top:6px",
+                title: "Rola d20 + iniciativa pra cada Pokémon com ficha e manda pro Pretty Sordid",
+                onclick: async (ev) => {
+                  ev.target.disabled = true;
+                  for (const i of withSheet) await rollInitiative(rules, i);
+                  ev.target.disabled = false;
+                  OBR.notification.show(`Iniciativa rolada pra ${withSheet.length} Pokémon.`, "SUCCESS");
+                },
+              }, "🎲 Rolar iniciativa de todos")
+            : null)
       : null,
     h("div", { class: "card small muted" },
       h("h2", {}, "Como usar"),

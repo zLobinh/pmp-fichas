@@ -1,7 +1,8 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.2.0";
-import { describe } from "./combat.js?v=0.2.0";
-import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.2.0";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.3.0";
+import { describe } from "./combat.js?v=0.3.0";
+import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.3.0";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.3.0";
 
 let hudOpen = false;
 
@@ -48,6 +49,8 @@ OBR.onReady(() => {
   OBR.player.onChange((player) => onSelection(player.selection));
   OBR.broadcast.onMessage(`${ID}/hud-closed`, () => { hudOpen = false; });
   OBR.scene.onReadyChange((ready) => { if (!ready) hudOpen = false; });
+
+  OBR.broadcast.onMessage(FX_CHANNEL, ({ data }) => { playFx(data).catch(() => {}); });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
     const text = describe(data);

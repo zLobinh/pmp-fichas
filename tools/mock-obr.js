@@ -16,10 +16,12 @@ function makePkmn(species, level, moves, extra = {}) {
   };
 }
 
+// grid: 150 px per square, 1.5 m per square. Charmander is 2 squares from Bulbasaur, Squirtle 10.
+const token = (x) => ({ position: { x, y: 0 }, image: { width: 150, height: 150 }, grid: { dpi: 150 }, scale: { x: 1, y: 1 } });
 const items = [
-  { id: "a", name: "Bulbasaur", type: "IMAGE", layer: "CHARACTER", metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Bulbasaur", 20, ["Tackle", "Razor Leaf", "Acid Spray", "Struggle"]), owner: "me" } } },
-  { id: "b", name: "Charmander", type: "IMAGE", layer: "CHARACTER", metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Charmander", 10, ["Ember", "Scratch"], { nature: "Alegre" }), owner: "gm" } } },
-  { id: "c", name: "Squirtle", type: "IMAGE", layer: "CHARACTER", metadata: {} },
+  { id: "a", name: "Bulbasaur", type: "IMAGE", layer: "CHARACTER", ...token(0), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Bulbasaur", 20, ["Tackle", "Razor Leaf", "Acid Spray", "Struggle"]), owner: "me" } } },
+  { id: "b", name: "Charmander", type: "IMAGE", layer: "CHARACTER", ...token(300), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Charmander", 10, ["Ember", "Scratch"], { nature: "Alegre" }), owner: "gm" } } },
+  { id: "c", name: "Squirtle", type: "IMAGE", layer: "CHARACTER", ...token(1500), metadata: {} },
 ];
 let selection = ["b"];
 let sceneMeta = {};
@@ -31,6 +33,13 @@ const OBR = {
   onReady: (cb) => setTimeout(cb, 0),
   isReady: true,
   scene: {
+    grid: {
+      getDpi: async () => 150,
+      getScale: async () => ({ raw: "1.5m", parsed: { multiplier: 1.5, unit: "m", digits: 1 } }),
+      // Chebyshev, like the Owlbear default
+      getDistance: async (a, b) => Math.round(Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) / 150),
+    },
+    local: { addItems: async () => {}, updateItems: async () => {}, deleteItems: async () => {} },
     isReady: async () => true,
     onReadyChange: () => () => {},
     getMetadata: async () => clone(sceneMeta),

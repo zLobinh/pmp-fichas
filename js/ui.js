@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.2.0";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.3.0";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -8,6 +8,31 @@ export const TYPE_COLOR = {
 };
 
 export const SHEET_ID = `${ID}/sheet`;
+
+// A die face. With animate, it tumbles through random numbers for ~0.7s and lands on the value.
+// kind: "crit" | "fumble" | "" (colors the face)
+export function die(value, { sides = 20, kind = "", animate = false } = {}) {
+  const el = document.createElement("span");
+  el.className = `die d${sides === 20 ? 20 : "x"} ${kind}`;
+  el.title = `d${sides}`;
+  if (!animate) {
+    el.textContent = value;
+    return el;
+  }
+  el.classList.add("rolling");
+  let ticks = 0;
+  const timer = setInterval(() => {
+    el.textContent = 1 + Math.floor(Math.random() * sides);
+    if (++ticks >= 12) {
+      clearInterval(timer);
+      el.textContent = value;
+      el.classList.remove("rolling");
+      el.classList.add("landed");
+    }
+  }, 55);
+  el.textContent = 1 + Math.floor(Math.random() * sides);
+  return el;
+}
 const AUTO_HUD_KEY = `${ID}/autoHud`;
 
 // per-player preference, kept in this browser

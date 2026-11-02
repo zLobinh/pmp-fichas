@@ -1,9 +1,12 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
-// click the targets on the map, then roll.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.2.0";
-import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.2.0";
-import { useMove } from "./combat.js?v=0.2.0";
-import { TYPE_COLOR, openSheet } from "./ui.js?v=0.2.0";
+// click the targets on the map, then roll. Initiative goes to Pretty Sordid.
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.3.0";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.3.0";
+import { useMove } from "./combat.js?v=0.3.0";
+import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.3.0";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.3.0";
+
+const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
 
 const root = document.getElementById("root");
 const state = {
@@ -13,17 +16,23 @@ const state = {
   mode: "idle", // "idle" | "target"
   pending: null, // move name waiting for targets
   targets: [],
-  last: null,
+  ranges: new Map(), // targetId -> { meters, ok, reason }
+  outOfRange: null, // OutOfRange error waiting for "roll anyway"
+  last: null, // last move result or initiative roll
   busy: false,
 };
 
 async function setAttacker(id) {
   state.attackerId = id;
   state.item = await getItem(id);
-  state.mode = "idle";
-  state.pending = null;
-  state.targets = [];
-  state.last = null;
+  Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, last: null });
+}
+
+async function updateRanges() {
+  state.ranges = new Map();
+  if (!state.pending || !state.targets.length) return;
+  const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
+  for (const r of await checkRange(state.item, move, state.targets)) state.ranges.set(r.id, r);
 }
 
 async function onSelection(selection) {
@@ -31,6 +40,8 @@ async function onSelection(selection) {
   if (state.mode === "target") {
     const others = ids.filter((id) => id !== state.attackerId);
     state.targets = others.length ? await OBR.scene.items.getItems(others) : [];
+    state.outOfRange = null;
+    await updateRanges();
     return render();
   }
   // follow the selection to another Pokémon this player controls
@@ -69,7 +80,27 @@ function hpBlock(pkmn) {
       h("button", { class: "small", onclick: apply((p, n) => { const t = Math.min(p.hp.temp ?? 0, n); p.hp.temp = (p.hp.temp ?? 0) - t; p.hp.current = Math.max(0, p.hp.current - (n - t)); }) }, "Dano"),
       h("button", { class: "small", onclick: apply((p, n) => { p.hp.current = Math.min(rules.maxHP(p), p.hp.current + n); }) }, "Curar"),
       h("span", { class: "spacer" }),
-      active.length ? h("span", { class: "small warn" }, active.map((s) => ({ Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" })[s] ?? s).join(", ")) : null));
+      active.length ? h("span", { class: "small warn" }, active.map((s) => STATUS_PT[s] ?? s).join(", ")) : null));
+}
+
+function initiativeBlock(pkmn) {
+  const init = initiativeOf(state.item);
+  return h("div", { class: `row hud-init ${init?.active ? "turn" : ""}` },
+    init?.active ? h("b", { class: "turn-tag" }, "▶ SUA VEZ") : null,
+    h("span", { class: "muted small" }, init ? `Iniciativa ${init.count}` : "Fora da iniciativa"),
+    h("span", { class: "spacer" }),
+    h("button", {
+      class: "small",
+      disabled: state.busy,
+      title: `d20 ${signed(state.rules.initiative(pkmn))} (DES${state.rules.featCount(pkmn, "Alerta") ? " + Alerta" : ""}), entra no Pretty Sordid`,
+      onclick: async () => {
+        state.busy = true;
+        render();
+        try { state.last = await rollInitiative(state.rules, state.item); state.last._fresh = true; }
+        catch (e) { OBR.notification.show(e.message, "ERROR"); }
+        finally { state.busy = false; render(); }
+      },
+    }, `🎲 Iniciativa ${signed(state.rules.initiative(pkmn))}`));
 }
 
 function moveRow(m) {
@@ -78,6 +109,7 @@ function moveRow(m) {
     m.attackBonus != null ? `Acerto ${signed(m.attackBonus)}` : null,
     m.saveDC != null ? `CD ${m.saveDC} ${ATTR_PT[m.save] ?? m.save}` : null,
     m.damage ? m.damageText : null,
+    m.rangeInfo.kind !== "any" ? m.rangeInfo.label : null,
   ].filter(Boolean).join(" · ");
   const selected = state.pending === m.name;
   return h("button", {
@@ -85,10 +117,13 @@ function moveRow(m) {
     style: `--type:${TYPE_COLOR[m.type] ?? "#777"}`,
     disabled: noPP || state.busy,
     title: `${TYPE_PT[m.type] ?? m.type} · ${[m.time, m.range].filter(Boolean).join(" · ")}`,
-    onclick: () => {
+    onclick: async () => {
       state.mode = "target";
       state.pending = m.name;
-      state.targets = [];
+      state.outOfRange = null;
+      const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
+      state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
+      await updateRanges();
       render();
     },
   },
@@ -100,51 +135,91 @@ function moveRow(m) {
 function targetBar() {
   if (state.mode !== "target") return null;
   const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
+  const cancel = () => { Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null }); render(); };
   return h("div", { class: "hud-target" },
-    h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), " → clique nos alvos no mapa (Shift+clique pra vários)"),
+    h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), ` · alcance ${move.rangeInfo.label}`),
+    h("div", { class: "small muted" }, "Clique nos alvos no mapa (Shift+clique pra vários)."),
     h("div", { class: "targets", style: "margin:4px 0" },
       state.targets.length
         ? state.targets.map((t) => {
             const p = getSheet(t)?.pkmn;
-            return h("span", { class: "chip on" }, t.name || "Token", p ? ` · CA ${state.rules.ac(p)}` : "");
+            const r = state.ranges.get(t.id);
+            return h("span", { class: `chip on ${r && !r.ok ? "far" : ""}`, title: r?.reason ?? "" },
+              t.name || "Token",
+              p ? ` · CA ${state.rules.ac(p)}` : "",
+              r?.meters != null ? ` · ${fmtM(r.meters)}` : "",
+              r ? (r.ok ? " ✓" : " ✗") : "");
           })
         : h("span", { class: "muted small" }, "Nenhum alvo: rola só o dano.")),
+    state.outOfRange
+      ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.outOfRange.message)
+      : null,
     h("div", { class: "row" },
-      h("button", { class: "primary", disabled: state.busy, onclick: roll }, state.busy ? "Rolando…" : "Rolar"),
-      h("button", { onclick: () => { state.mode = "idle"; state.pending = null; state.targets = []; render(); } }, "Cancelar")));
+      state.outOfRange
+        ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true) }, "Rolar mesmo assim")
+        : h("button", { class: "primary", disabled: state.busy, onclick: () => roll(false) }, state.busy ? "Rolando…" : "Rolar"),
+      h("button", { onclick: cancel }, "Cancelar")));
 }
 
-function resultLine() {
+// the last result, with the dice tumbling the first time it shows. The node is kept between
+// renders so the animation isn't cut off when HP/PP updates re-render the HUD.
+let resultCache = { entry: null, node: null };
+function resultBlock() {
   const e = state.last;
   if (!e || state.mode === "target") return null;
+  if (resultCache.entry === e) return resultCache.node;
+  resultCache = { entry: e, node: buildResult(e) };
+  return resultCache.node;
+}
+
+function buildResult(e) {
+  const animate = e._fresh === true;
+  e._fresh = false;
+  if (e.kind === "check") {
+    return h("div", { class: "hud-result row" },
+      die(e.nat, { animate, kind: e.nat === 20 ? "crit" : e.nat === 1 ? "fumble" : "" }),
+      h("span", {}, `${e.label}: `, h("b", {}, e.total), h("span", { class: "muted" }, ` (${e.nat}${signed(e.bonus)})`)));
+  }
   return h("div", { class: "hud-result" },
     h("div", { class: "muted small" }, e.move),
     e.results.map((r) => {
       if (!r.target) return h("div", {}, r.note);
-      const bits = [h("b", {}, r.target), " "];
+      const bits = [];
+      if (r.attack) bits.push(die(r.attack.nat, { animate, kind: r.attack.crit ? "crit" : r.attack.fumble ? "fumble" : "" }));
+      else if (r.save && !r.save.unknown) bits.push(die(r.save.nat, { animate }));
+      bits.push(h("b", {}, r.target), " ");
       if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null ? ` vs ${r.attack.ac}` : ""}) `);
       if (r.save && !r.save.unknown) bits.push(h("span", { class: r.save.success ? "no" : "ok" }, `${r.save.effectOnly ? "efeito: " : ""}TR ${r.save.total} vs ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
       if (r.save?.unknown) bits.push(`TR ${r.save.attr} CD ${r.save.dc} `);
-      if (r.damage) bits.push(h("b", {}, `${r.damage.final} dano`), r.damage.effLabel ? ` ${r.damage.effLabel}` : "");
+      if (r.damage) {
+        bits.push(h("b", {}, `${r.damage.final} dano`), r.damage.effLabel ? ` ${r.damage.effLabel}` : "");
+      }
       if (r.hpAfter) bits.push(h("span", { class: "muted" }, ` → ${r.hpAfter}`));
-      return h("div", {}, bits);
+      const dmgDice = r.damage?.dice.flat().length
+        ? h("div", { class: "dice-row" }, r.damage.dice.flat().map((v) => die(v, { sides: r.damage.sides ?? 6, animate })),
+            r.damage.bonus ? h("span", { class: "muted small" }, signed(r.damage.bonus)) : null)
+        : null;
+      return h("div", { class: "hud-res-line" }, h("div", { class: "row", style: "gap:4px" }, bits), dmgDice);
     }));
 }
 
-async function roll() {
+async function roll(ignoreRange) {
   state.busy = true;
   render();
   try {
     state.item = await getItem(state.attackerId);
-    state.last = await useMove(state.rules, state.item, state.pending, state.targets);
+    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange });
+    state.last._fresh = true;
+    Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null });
+    await OBR.player.select([state.attackerId], true); // back to the attacker
   } catch (e) {
-    OBR.notification.show(e.message, "ERROR");
+    if (e instanceof OutOfRange) state.outOfRange = e;
+    else {
+      OBR.notification.show(e.message, "ERROR");
+      Object.assign(state, { mode: "idle", pending: null, targets: [] });
+    }
   } finally {
     state.busy = false;
-    state.mode = "idle";
-    state.pending = null;
-    state.targets = [];
-    await OBR.player.select([state.attackerId], true); // back to the attacker
     render();
   }
 }
@@ -171,16 +246,17 @@ function render() {
       h("button", { class: "icon", title: "Ficha completa", onclick: () => openSheet(state.attackerId) }, "☰"),
       h("button", { class: "icon", title: "Fechar", onclick: close }, "✕")),
     hpBlock(pkmn),
+    initiativeBlock(pkmn),
     targetBar(),
     h("div", { class: "hud-moves" }, rules.moveList(pkmn).map(moveRow)),
-    resultLine()));
+    resultBlock()));
   fit();
 }
 
 // grow/shrink the popover to its content
 function fit() {
   requestAnimationFrame(() => {
-    const height = Math.min(600, Math.ceil(root.getBoundingClientRect().height) + 2);
+    const height = Math.min(640, Math.ceil(root.getBoundingClientRect().height) + 2);
     OBR.popover.setHeight(HUD_ID, height).catch(() => {});
   });
 }
@@ -190,10 +266,11 @@ OBR.onReady(async () => {
   state.rules = await loadRules();
   await setAttacker(state.attackerId);
   render();
-  OBR.scene.items.onChange((items) => {
+  OBR.scene.items.onChange(async (items) => {
     const it = items.find((i) => i.id === state.attackerId);
     if (it) state.item = it;
     state.targets = state.targets.map((t) => items.find((i) => i.id === t.id)).filter(Boolean);
+    if (state.mode === "target") await updateRanges();
     render();
   });
   OBR.player.onChange((p) => onSelection(p.selection));

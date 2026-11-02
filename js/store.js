@@ -1,8 +1,8 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
-import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.2.0";
+import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+import { Rules } from "./rules.js?v=0.3.0";
 
-export { OBR };
+export { OBR, SDK };
 export const ID = "com.pmp-fichas";
 export const SHEET_KEY = `${ID}/sheet`;
 export const LOG_KEY = `${ID}/log`;
@@ -94,7 +94,7 @@ export async function pushLog(entry) {
 
 export async function getSettings() {
   const meta = await OBR.room.getMetadata();
-  return { autoDamage: true, autoPP: true, ...(meta[SETTINGS_KEY] ?? {}) };
+  return { autoDamage: true, autoPP: true, checkRange: true, mapFx: true, ...(meta[SETTINGS_KEY] ?? {}) };
 }
 
 export async function setSettings(patch) {

@@ -1,7 +1,8 @@
 // Using a move: attack rolls / saving throws against each target, damage with type effectiveness,
 // then HP and PP changes written back to the tokens.
-import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.2.0";
-import { d, rollDice, TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.2.0";
+import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.3.0";
+import { d, rollDice, TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.3.0";
+import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.3.0";
 
 function rollDamage(dmg, crit) {
   const hits = [];
@@ -22,7 +23,8 @@ function takeDamage(pkmn, amount) {
   pkmn.hp.current = Math.max(0, pkmn.hp.current - (amount - fromTemp));
 }
 
-export async function useMove(rules, attackerItem, moveName, targetItems) {
+// opts.ignoreRange: roll even with targets out of range (the player confirmed)
+export async function useMove(rules, attackerItem, moveName, targetItems, opts = {}) {
   const settings = await getSettings();
   const attacker = getSheet(attackerItem).pkmn;
   const move = rules.moveData(attacker, moveName);
@@ -35,6 +37,10 @@ export async function useMove(rules, attackerItem, moveName, targetItems) {
   };
 
   if (typeof move.pp === "number" && move.pp <= 0) throw new Error(`${move.label} está sem PP.`);
+  if (settings.checkRange && !opts.ignoreRange && targetItems.length) {
+    const out = (await checkRange(attackerItem, move, targetItems)).filter((x) => !x.ok);
+    if (out.length) throw new OutOfRange(out);
+  }
 
   const damageChanges = new Map();
   for (const t of targetItems) {
@@ -79,7 +85,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems) {
       const eff = target ? rules.effectiveness(move.type, target) : 1;
       let final = Math.floor(roll.total * eff);
       if (hitFactor === 0.5) final = Math.floor(final / 2);
-      r.damage = { dice: roll.hits.map((h) => h.dice), rolled: roll.total, eff, effLabel: effLabel(eff), final, half: hitFactor === 0.5 };
+      r.damage = { dice: roll.hits.map((h) => h.dice), sides: move.damage.dice, bonus: move.damage.bonus, rolled: roll.total, eff, effLabel: effLabel(eff), final, half: hitFactor === 0.5 };
       if (target && settings.autoDamage) damageChanges.set(t.id, final);
     }
     entry.results.push(r);
@@ -101,6 +107,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems) {
   }
 
   await pushLog(entry);
+  if (settings.mapFx) await sendFx(attackerItem, entry, targetItems).catch(() => {});
   return entry;
 }
 

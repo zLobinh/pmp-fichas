@@ -121,6 +121,11 @@ export class Rules {
     return out;
   }
 
+  // M.get_initiative_modifier (without speed stage, item and ability bonuses)
+  initiative(pkmn) {
+    return mod(this.attributes(pkmn).DEX) + (this.featCount(pkmn, "Alerta") ? 5 : 0);
+  }
+
   levelIndex(pkmn) {
     const l = this.level(pkmn);
     return l >= 17 ? "17" : l >= 10 ? "10" : l >= 5 ? "5" : "1";
@@ -168,6 +173,7 @@ export class Rules {
       description: move.Description,
       scaling: move.Scaling,
       table: move.Table,
+      rangeInfo: parseRange(move.Range),
       ppMax: this.moveMaxPP(pkmn, name),
       pp: this.movePP(pkmn, name),
       stab,
@@ -201,6 +207,28 @@ export class Rules {
     return m;
   }
 }
+
+// Reads the PMP "Range" text. kind:
+//   melee  "Corpo a corpo" (1,5 m) or "Corpo a corpo (12 metros)"
+//   ranged "(9 metros)", "6 m"
+//   area   "Pessoal (cone/raio/linha de 12 metros)": targets within that distance of the user
+//   self   "Pessoal": only the user
+//   any    "Variável", empty or anything not understood: not checked
+export function parseRange(text) {
+  const t = (text ?? "").trim();
+  const low = t.toLowerCase();
+  const num = low.match(/(\d+(?:,\d+)?)\s*(?:metros|m\b)/);
+  const meters = num ? parseFloat(num[1].replace(",", ".")) : null;
+  const melee = low.startsWith("corpo a corpo") || low === "melee" || low.startsWith("toque");
+  if (melee && !meters) return { kind: "melee", meters: 1.5, label: "corpo a corpo" };
+  if (melee) return { kind: "melee", meters, label: `corpo a corpo, ${fmtM(meters)}` };
+  if (low.startsWith("pessoal") && meters) return { kind: "area", meters, label: `área de ${fmtM(meters)}` };
+  if (low.startsWith("pessoal")) return { kind: "self", meters: 0, label: "pessoal" };
+  if (meters) return { kind: "ranged", meters, label: fmtM(meters) };
+  return { kind: "any", meters: null, label: t || "—" };
+}
+const fmtM = (m) => `${String(m).replace(".", ",")} m`;
+export { fmtM };
 
 export function formatDamage({ amount, dice, bonus, times }) {
   let text = amount && dice ? `${amount}d${dice}` : "";

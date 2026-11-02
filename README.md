@@ -21,6 +21,15 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
     - Efetividade de tipo (×4, ×2, ×½, ×¼, imune), HP temporário primeiro, PP gasto.
   - **Descansar:** HP cheio, PP restaurado, status limpos.
   - **Exportar:** copia a ficha atualizada pra importar de volta no app.
+- **Alcance:** o Move só rola se o alvo estiver no alcance (medido como a régua do Owlbear, borda a borda).
+  "Corpo a corpo" = 1,5 m; "(9 metros)" = 9 m; "Pessoal (cone/raio/linha de X)" = alvos a até X; "Pessoal" = só ele mesmo.
+  Fora do alcance aparece o aviso e o botão *Rolar mesmo assim*. O mestre pode desligar a checagem.
+- **Iniciativa (Pretty Sordid):** botão 🎲 *Iniciativa* na ficha rápida e na completa (d20 + DES, +5 com Alerta).
+  O valor entra direto no Pretty Sordid e a ordem é atualizada. Quando é a vez do Pokémon, a ficha rápida mostra *▶ SUA VEZ*.
+  No painel, o mestre tem *Rolar iniciativa de todos*.
+- **Dados na tela:** o d20 e os dados de dano giram e caem no resultado (crítico dourado, 1 natural vermelho).
+- **Animação no mapa:** linha do atacante até cada alvo, anel e número do dano (vermelho = acertou, dourado = crítico,
+  cinza tracejado = errou). Todo mundo na sala vê.
 - **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre.
 - Todo mundo na sala recebe uma notificação de cada rolagem.
 
