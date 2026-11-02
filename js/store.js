@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.4.0";
+import { Rules } from "./rules.js?v=0.4.1";
 
 export { OBR, SDK };
 export const ID = "com.pmp-fichas";
@@ -20,8 +20,16 @@ export const STATUSES = {
   Confused: "Confuso",
 };
 
-// absolute URL of a file of this extension (works on a GitHub Pages sub-path)
-export const asset = (path) => new URL(`../${path}`, import.meta.url).href;
+// set by tools/bump_version.py
+export const VERSION = "0.4.1";
+
+// absolute URL of a file of this extension (works on a GitHub Pages sub-path), tagged with the
+// version so browsers don't keep serving the previous one from their cache
+export const asset = (path) => {
+  const url = new URL(`../${path}`, import.meta.url);
+  url.searchParams.set("v", VERSION);
+  return url.href;
+};
 
 let rulesPromise;
 export function loadRules() {

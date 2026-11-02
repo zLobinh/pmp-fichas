@@ -1,11 +1,11 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.4.0";
-import { getRoller } from "./dice.js?v=0.4.0";
-import { AIM_START, AIM_DONE, AIM_CANCEL } from "./area.js?v=0.4.0";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.4.0";
-import { useMove, describe } from "./combat.js?v=0.4.0";
-import { TYPE_COLOR, die } from "./ui.js?v=0.4.0";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.0";
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.4.1";
+import { getRoller } from "./dice.js?v=0.4.1";
+import { AIM_DONE, AIM_CANCEL, AIM_STALE, requestAim } from "./area.js?v=0.4.1";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.4.1";
+import { useMove, describe } from "./combat.js?v=0.4.1";
+import { TYPE_COLOR, die } from "./ui.js?v=0.4.1";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.1";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -170,8 +170,9 @@ async function doMove(name, ignoreRange, areaTargets) {
   const m = state.rules.moveData(getSheet(state.item).pkmn, name);
   if (m.rangeInfo.kind === "area" && !areaTargets) {
     state.aiming = name;
-    OBR.notification.show(`${m.label}: mire a área no mapa e clique pra usar (Esc cancela).`, "INFO");
-    await OBR.broadcast.sendMessage(AIM_START, { attackerId: itemId, moveName: name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` }, { destination: "LOCAL" });
+    const ok = await requestAim({ attackerId: itemId, moveName: name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` });
+    if (ok) OBR.notification.show(`${m.label}: mire a área no mapa e clique pra usar (Esc cancela).`, "INFO");
+    else { state.aiming = null; OBR.notification.show(AIM_STALE, "WARNING"); }
     return;
   }
   state.busy = true;

@@ -2,7 +2,8 @@
 """Sets the extension version everywhere, so browsers drop the cached old files.
 
 GitHub Pages lets browsers cache files for 10 minutes; a "?v=<version>" on every
-script/style URL (including the imports between modules) forces the new code.
+URL forces the new code: the pages in the manifest, the scripts/styles in the pages,
+the imports between modules, and (through VERSION in store.js) every file opened by asset().
 
     python tools/bump_version.py 0.2.1
 """
@@ -16,7 +17,12 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     version = sys.argv[1]
     manifest = ROOT / "manifest.json"
-    manifest.write_text(re.sub(r'"version": "[^"]+"', f'"version": "{version}"', manifest.read_text(encoding="utf-8"), count=1), encoding="utf-8")
+    text = re.sub(r'"version": "[^"]+"', f'"version": "{version}"', manifest.read_text(encoding="utf-8"), count=1)
+    text = re.sub(r'(\.html)(\?v=[^"]*)?"', rf'\1?v={version}"', text)
+    manifest.write_text(text, encoding="utf-8")
+
+    store = ROOT / "js" / "store.js"
+    store.write_text(re.sub(r'export const VERSION = "[^"]*";', f'export const VERSION = "{version}";', store.read_text(encoding="utf-8")), encoding="utf-8")
 
     for page in ROOT.glob("*.html"):
         text = page.read_text(encoding="utf-8")

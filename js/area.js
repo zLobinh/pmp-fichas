@@ -1,11 +1,25 @@
 // Area templates for "Pessoal (cone/linha/raio/semicírculo de X metros)" moves.
 // Runs in the background page: a temporary tool draws the template from the Pokémon toward the
 // mouse, shows who is inside, and on click hands the targets back to the sheet that asked.
-import { OBR, SDK, ID, asset } from "./store.js?v=0.4.0";
+import { OBR, SDK, ID, asset } from "./store.js?v=0.4.1";
 
 export const AIM_START = `${ID}/aim-start`;
 export const AIM_DONE = `${ID}/aim-done`;
 export const AIM_CANCEL = `${ID}/aim-cancel`;
+export const AIM_ACK = `${ID}/aim-ack`;
+
+// asks the background to start aiming; resolves false if it doesn't answer (an old cached
+// background page, or the extension not loaded in this browser)
+export function requestAim(req) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { off(); resolve(false); }, 2000);
+    const off = OBR.broadcast.onMessage(AIM_ACK, ({ data }) => {
+      if (data?.attackerId === req.attackerId && data?.moveName === req.moveName) { clearTimeout(timer); off(); resolve(true); }
+    });
+    OBR.broadcast.sendMessage(AIM_START, req, { destination: "LOCAL" }).catch(() => { clearTimeout(timer); off(); resolve(false); });
+  });
+}
+export const AIM_STALE = "A parte da extensão que desenha a área não respondeu. Recarregue a página do Owlbear (F5) e tente de novo.";
 const TOOL = `${ID}/aim-tool`;
 const MODE = `${ID}/aim-mode`;
 const COLOR = "#e3504f";

@@ -1,9 +1,9 @@
 // Using a move: attack rolls / saving throws against each target, damage with type effectiveness,
 // then HP and PP changes written back to the tokens. Dice go through Dice+ when it is in the room.
-import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.4.0";
-import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.4.0";
-import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.4.0";
-import { getRoller } from "./dice.js?v=0.4.0";
+import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.4.1";
+import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.4.1";
+import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.4.1";
+import { getRoller } from "./dice.js?v=0.4.1";
 
 async function rollDamage(roller, dmg, crit, text) {
   const hits = [];
