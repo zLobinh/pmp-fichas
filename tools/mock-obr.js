@@ -22,8 +22,11 @@ const items = [
   { id: "a", name: "Bulbasaur", type: "IMAGE", layer: "CHARACTER", ...token(0), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Bulbasaur", 20, ["Tackle", "Razor Leaf", "Acid Spray", "Struggle"]), owner: "me" } } },
   { id: "b", name: "Charmander", type: "IMAGE", layer: "CHARACTER", ...token(300), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Charmander", 10, ["Ember", "Scratch"], { nature: "Alegre" }), owner: "gm" } } },
   { id: "c", name: "Squirtle", type: "IMAGE", layer: "CHARACTER", ...token(1500), metadata: {} },
+  { id: "d", name: "Oddish", type: "IMAGE", layer: "CHARACTER", ...token(450), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Oddish", 8, ["Absorb"]), owner: "gm" } } },
 ];
+items[3].position = { x: 300, y: 300 }; // Oddish: 2 squares right, 2 down (diagonal)
 let selection = ["b"];
+const channels = {};
 let sceneMeta = {};
 let roomMeta = {};
 const emit = (k, v) => listeners[k].forEach((f) => f(v));
@@ -72,7 +75,14 @@ const OBR = {
   },
   theme: { getTheme: async () => ({ mode: "DARK" }), onChange: () => {} },
   notification: { show: async (msg, v) => { console.log("[notificação]", v, msg); (window.__notes ??= []).push(msg); } },
-  broadcast: { sendMessage: async (ch, data) => console.log("[broadcast]", ch, data), onMessage: () => {} },
+  // messages are delivered inside this page (enough to fake the background answering the sheet)
+  broadcast: {
+    sendMessage: async (ch, data) => {
+      (window.__sent ??= []).push({ ch, data });
+      setTimeout(() => (channels[ch] ?? []).forEach((f) => f({ data: clone(data) })), 0);
+    },
+    onMessage: (ch, f) => { (channels[ch] ??= []).push(f); return () => { channels[ch] = channels[ch].filter((x) => x !== f); }; },
+  },
   popover: {
     open: async (o) => console.log("[popover.open]", o.url),
     close: async () => console.log("[popover.close]"),

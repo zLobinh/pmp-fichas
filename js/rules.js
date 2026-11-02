@@ -222,7 +222,11 @@ export function parseRange(text) {
   const melee = low.startsWith("corpo a corpo") || low === "melee" || low.startsWith("toque");
   if (melee && !meters) return { kind: "melee", meters: 1.5, label: "corpo a corpo" };
   if (melee) return { kind: "melee", meters, label: `corpo a corpo, ${fmtM(meters)}` };
-  if (low.startsWith("pessoal") && meters) return { kind: "area", meters, label: `área de ${fmtM(meters)}` };
+  if (low.startsWith("pessoal") && meters) {
+    const shape = low.includes("cone") ? "cone" : low.includes("linha") ? "line" : low.includes("semic") ? "semicircle" : "radius";
+    const name = { cone: "cone", line: "linha", semicircle: "semicírculo", radius: "raio" }[shape];
+    return { kind: "area", shape, meters, label: `${name} de ${fmtM(meters)}` };
+  }
   if (low.startsWith("pessoal")) return { kind: "self", meters: 0, label: "pessoal" };
   if (meters) return { kind: "ranged", meters, label: fmtM(meters) };
   return { kind: "any", meters: null, label: t || "—" };

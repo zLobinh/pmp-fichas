@@ -1,8 +1,9 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.3.0";
-import { describe } from "./combat.js?v=0.3.0";
-import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.3.0";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.3.0";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.4.0";
+import { describe } from "./combat.js?v=0.4.0";
+import { openSheet, openHud, autoHudEnabled } from "./ui.js?v=0.4.0";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.4.0";
+import { AIM_START, AIM_ABORT, startAim, abortAim } from "./area.js?v=0.4.0";
 
 let hudOpen = false;
 
@@ -51,6 +52,10 @@ OBR.onReady(() => {
   OBR.scene.onReadyChange((ready) => { if (!ready) hudOpen = false; });
 
   OBR.broadcast.onMessage(FX_CHANNEL, ({ data }) => { playFx(data).catch(() => {}); });
+  OBR.broadcast.onMessage(AIM_START, ({ data }) => {
+    startAim(data).catch((e) => OBR.notification.show(`Erro ao mirar a área: ${e.message}`, "ERROR"));
+  });
+  OBR.broadcast.onMessage(AIM_ABORT, () => { abortAim().catch(() => {}); });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
     const text = describe(data);

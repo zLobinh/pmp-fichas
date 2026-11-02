@@ -1,6 +1,6 @@
 {
   "name": "PMP Fichas",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "manifest_version": 1,
   "description": "Fichas do app PMP (Pokedex5E) nos tokens: moves, rolagens contra alvos, HP e PP.",
   "icon": "/pmp-fichas/icons/pokeball.svg",

@@ -1,6 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog } from "./store.js?v=0.3.0";
-import { d, fmtM } from "./rules.js?v=0.3.0";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.4.0";
+import { fmtM } from "./rules.js?v=0.4.0";
+import { getRoller } from "./dice.js?v=0.4.0";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -75,10 +76,12 @@ export async function setInitiative(itemId, total) {
 export async function rollInitiative(rules, item) {
   const pkmn = getSheet(item).pkmn;
   const bonus = rules.initiative(pkmn);
-  const nat = d(20);
+  const settings = await getSettings();
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  const { nat } = await roller.d20(bonus, `${item.name || rules.name(pkmn)} iniciativa`);
   const total = nat + bonus;
   await setInitiative(item.id, total);
-  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: "Iniciativa", nat, bonus, total };
+  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: "Iniciativa", nat, bonus, total, roller: roller.name };
   await pushLog(entry);
   return entry;
 }

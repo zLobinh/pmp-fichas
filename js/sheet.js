@@ -1,9 +1,11 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, h, syncTheme } from "./store.js?v=0.3.0";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.3.0";
-import { useMove, describe } from "./combat.js?v=0.3.0";
-import { TYPE_COLOR, die } from "./ui.js?v=0.3.0";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.3.0";
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.4.0";
+import { getRoller } from "./dice.js?v=0.4.0";
+import { AIM_START, AIM_DONE, AIM_CANCEL } from "./area.js?v=0.4.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.4.0";
+import { useMove, describe } from "./combat.js?v=0.4.0";
+import { TYPE_COLOR, die } from "./ui.js?v=0.4.0";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -58,7 +60,7 @@ function statsCard(pkmn) {
         title: "Rola d20 + iniciativa e coloca no Pretty Sordid",
         disabled: state.busy,
         onclick: async () => {
-          try { state.last = await rollInitiative(rules, state.item); state.last._fresh = true; render(); }
+          try { state.last = await rollInitiative(rules, state.item); state.last._fresh = state.last.roller !== "Dice+"; render(); }
           catch (e) { OBR.notification.show(e.message, "ERROR"); }
         },
       }, initiativeOf(state.item) ? `🎲 Iniciativa (${initiativeOf(state.item).count})` : "🎲 Iniciativa") : null),
@@ -155,20 +157,30 @@ function buildResult(e) {
 }
 
 async function rollCheck(label, bonus) {
-  const nat = d(20);
-  const entry = { kind: "check", attacker: state.item.name, label, nat, bonus, total: nat + bonus, _fresh: true };
+  const settings = await getSettings();
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  const { nat } = await roller.d20(bonus, `${state.item.name} ${label}`);
+  const entry = { kind: "check", attacker: state.item.name, label, nat, bonus, total: nat + bonus, roller: roller.name, _fresh: roller.name !== "Dice+" };
   state.last = entry;
   render();
   await pushLog(entry);
 }
 
-async function doMove(name, ignoreRange) {
+async function doMove(name, ignoreRange, areaTargets) {
+  const m = state.rules.moveData(getSheet(state.item).pkmn, name);
+  if (m.rangeInfo.kind === "area" && !areaTargets) {
+    state.aiming = name;
+    OBR.notification.show(`${m.label}: mire a área no mapa e clique pra usar (Esc cancela).`, "INFO");
+    await OBR.broadcast.sendMessage(AIM_START, { attackerId: itemId, moveName: name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` }, { destination: "LOCAL" });
+    return;
+  }
   state.busy = true;
   render();
   try {
-    await refreshTargets();
-    state.last = await useMove(state.rules, state.item, name, state.targets, { ignoreRange });
-    state.last._fresh = true;
+    if (areaTargets) state.targets = areaTargets;
+    else await refreshTargets();
+    state.last = await useMove(state.rules, state.item, name, state.targets, { ignoreRange, area: !!areaTargets });
+    state.last._fresh = state.last.roller !== "Dice+";
     state.forceMove = null;
     state.rangeMsg = null;
   } catch (e) {
@@ -279,4 +291,11 @@ OBR.onReady(async () => {
     await refreshTargets(player.selection ?? []);
     render();
   });
+  OBR.broadcast.onMessage(AIM_DONE, async ({ data }) => {
+    if (state.aiming !== data.moveName || data.attackerId !== itemId) return;
+    state.aiming = null;
+    const targets = data.targetIds.length ? await OBR.scene.items.getItems(data.targetIds) : [];
+    await doMove(data.moveName, true, targets);
+  });
+  OBR.broadcast.onMessage(AIM_CANCEL, () => { state.aiming = null; });
 });

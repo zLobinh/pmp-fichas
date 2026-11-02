@@ -1,14 +1,16 @@
 // Using a move: attack rolls / saving throws against each target, damage with type effectiveness,
-// then HP and PP changes written back to the tokens.
-import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.3.0";
-import { d, rollDice, TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.3.0";
-import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.3.0";
+// then HP and PP changes written back to the tokens. Dice go through Dice+ when it is in the room.
+import { OBR, getSheet, updatePokemon, pushLog, getSettings } from "./store.js?v=0.4.0";
+import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.4.0";
+import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.4.0";
+import { getRoller } from "./dice.js?v=0.4.0";
 
-function rollDamage(dmg, crit) {
+async function rollDamage(roller, dmg, crit, text) {
   const hits = [];
   for (let i = 0; i < dmg.times; i++) {
-    const dice = dmg.amount && dmg.dice ? rollDice(dmg.amount * (crit ? 2 : 1), dmg.dice) : [];
-    hits.push({ dice, total: dice.reduce((a, b) => a + b, 0) + dmg.bonus });
+    if (!dmg.amount || !dmg.dice) { hits.push({ dice: [], total: dmg.bonus }); continue; }
+    const r = await roller.damage(dmg.amount * (crit ? 2 : 1), dmg.dice, dmg.bonus, text);
+    hits.push({ dice: r.dice, total: r.total + dmg.bonus });
   }
   return { hits, total: Math.max(0, hits.reduce((a, h) => a + h.total, 0)) };
 }
@@ -24,34 +26,41 @@ function takeDamage(pkmn, amount) {
 }
 
 // opts.ignoreRange: roll even with targets out of range (the player confirmed)
+// opts.area: the targets came from an area template (no range check, damage rolled once for everyone)
 export async function useMove(rules, attackerItem, moveName, targetItems, opts = {}) {
   const settings = await getSettings();
   const attacker = getSheet(attackerItem).pkmn;
   const move = rules.moveData(attacker, moveName);
+  const who = attackerItem.name || rules.name(attacker);
   const entry = {
     kind: "move",
-    attacker: attackerItem.name || rules.name(attacker),
+    attacker: who,
     move: move.label,
     type: TYPE_PT[move.type] ?? move.type,
+    area: opts.area ? move.rangeInfo.label : null,
     results: [],
   };
 
   if (typeof move.pp === "number" && move.pp <= 0) throw new Error(`${move.label} está sem PP.`);
-  if (settings.checkRange && !opts.ignoreRange && targetItems.length) {
+  if (settings.checkRange && !opts.ignoreRange && !opts.area && targetItems.length) {
     const out = (await checkRange(attackerItem, move, targetItems)).filter((x) => !x.ok);
     if (out.length) throw new OutOfRange(out);
   }
 
-  const damageChanges = new Map();
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  entry.roller = roller.name;
+  const moveName_ = move.label.replace(/ PMP$/, "");
+
+  // 1) attack rolls / saves per target
+  const plans = [];
   for (const t of targetItems) {
-    const tSheet = getSheet(t);
-    const target = tSheet?.pkmn;
+    const target = getSheet(t)?.pkmn;
     const r = { targetId: t.id, target: t.name || (target ? rules.name(target) : "Alvo") };
     let hitFactor = 1; // 1 full damage, 0.5 half (save success), 0 none
     let crit = false;
 
     if (move.attackBonus != null) {
-      const nat = d(20);
+      const { nat } = await roller.d20(move.attackBonus, `${moveName_} → ${r.target}`);
       const total = nat + move.attackBonus;
       const ac = target ? rules.ac(target) : null;
       crit = nat === 20;
@@ -61,16 +70,16 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // attack + save (e.g. Acid Spray): the save is for the secondary effect, damage is unchanged
       if (hit && move.saveDC != null) {
         const saveMod = target ? rules.saves(target)[move.save] ?? 0 : null;
-        const sNat = saveMod != null ? d(20) : null;
-        r.save = saveMod != null
-          ? { attr: ATTR_PT[move.save] ?? move.save, nat: sNat, total: sNat + saveMod, dc: move.saveDC, success: sNat + saveMod >= move.saveDC, effectOnly: true }
-          : { attr: ATTR_PT[move.save] ?? move.save, dc: move.saveDC, unknown: true, effectOnly: true };
+        if (saveMod != null) {
+          const { nat: sNat } = await roller.d20(saveMod, `${r.target} TR ${ATTR_PT[move.save] ?? move.save}`);
+          r.save = { attr: ATTR_PT[move.save] ?? move.save, nat: sNat, total: sNat + saveMod, dc: move.saveDC, success: sNat + saveMod >= move.saveDC, effectOnly: true };
+        } else r.save = { attr: ATTR_PT[move.save] ?? move.save, dc: move.saveDC, unknown: true, effectOnly: true };
       }
     } else if (move.saveDC != null) {
       const attr = move.save;
       const saveMod = target ? rules.saves(target)[attr] ?? 0 : null;
       if (saveMod != null) {
-        const nat = d(20);
+        const { nat } = await roller.d20(saveMod, `${r.target} TR ${ATTR_PT[attr] ?? attr} (CD ${move.saveDC})`);
         const total = nat + saveMod;
         const success = total >= move.saveDC;
         r.save = { attr: ATTR_PT[attr] ?? attr, nat, total, dc: move.saveDC, success };
@@ -79,19 +88,33 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         r.save = { attr: ATTR_PT[attr] ?? attr, dc: move.saveDC, unknown: true };
       }
     }
-
-    if (move.damage && hitFactor > 0) {
-      const roll = rollDamage(move.damage, crit);
-      const eff = target ? rules.effectiveness(move.type, target) : 1;
-      let final = Math.floor(roll.total * eff);
-      if (hitFactor === 0.5) final = Math.floor(final / 2);
-      r.damage = { dice: roll.hits.map((h) => h.dice), sides: move.damage.dice, bonus: move.damage.bonus, rolled: roll.total, eff, effLabel: effLabel(eff), final, half: hitFactor === 0.5 };
-      if (target && settings.autoDamage) damageChanges.set(t.id, final);
-    }
+    plans.push({ t, target, r, hitFactor, crit });
     entry.results.push(r);
   }
 
-  if (!targetItems.length) entry.results.push({ target: null, note: move.damage ? `Dano: ${move.damageText}` : "Move usado" });
+  // 2) damage: one roll per target, or one roll shared by the whole area (no crits on areas)
+  const damageChanges = new Map();
+  let shared = null;
+  if (move.damage) {
+    for (const p of plans) {
+      if (p.hitFactor === 0) continue;
+      let roll;
+      if (opts.area) roll = shared ??= await rollDamage(roller, move.damage, false, `${moveName_} (área)`);
+      else roll = await rollDamage(roller, move.damage, p.crit, `${moveName_} dano${p.crit ? " CRÍTICO" : ""}`);
+      const eff = p.target ? rules.effectiveness(move.type, p.target) : 1;
+      let final = Math.floor(roll.total * eff);
+      if (p.hitFactor === 0.5) final = Math.floor(final / 2);
+      p.r.damage = { dice: roll.hits.map((h) => h.dice), sides: move.damage.dice, bonus: move.damage.bonus, rolled: roll.total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area };
+      if (p.target && settings.autoDamage) damageChanges.set(p.t.id, final);
+    }
+  }
+
+  if (!targetItems.length) {
+    if (move.damage) {
+      const roll = await rollDamage(roller, move.damage, false, `${moveName_} dano`);
+      entry.results.push({ target: null, note: `Dano: ${roll.total} (${move.damageText})`, damage: { dice: roll.hits.map((h) => h.dice), sides: move.damage.dice, bonus: move.damage.bonus, final: roll.total } });
+    } else entry.results.push({ target: null, note: opts.area ? "Nenhum alvo na área" : "Move usado" });
+  }
 
   if (settings.autoPP && typeof move.pp === "number") {
     await updatePokemon(attackerItem.id, (p) => {
@@ -124,5 +147,5 @@ export function describe(entry) {
     if (r.hpAfter) s += ` → HP ${r.hpAfter}`;
     return s.trim();
   });
-  return `${entry.attacker} usou ${entry.move}. ${parts.join(" | ")}`;
+  return `${entry.attacker} usou ${entry.move}${entry.area ? ` (${entry.area})` : ""}. ${parts.join(" | ")}`;
 }

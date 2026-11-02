@@ -1,10 +1,11 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.3.0";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.3.0";
-import { useMove } from "./combat.js?v=0.3.0";
-import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.3.0";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.3.0";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.4.0";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.4.0";
+import { useMove } from "./combat.js?v=0.4.0";
+import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.4.0";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.0";
+import { AIM_START, AIM_DONE, AIM_CANCEL, AIM_ABORT } from "./area.js?v=0.4.0";
 
 const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
 
@@ -37,6 +38,7 @@ async function updateRanges() {
 
 async function onSelection(selection) {
   const ids = selection ?? [];
+  if (state.mode === "aim") return; // the area tool picks the targets
   if (state.mode === "target") {
     const others = ids.filter((id) => id !== state.attackerId);
     state.targets = others.length ? await OBR.scene.items.getItems(others) : [];
@@ -96,7 +98,7 @@ function initiativeBlock(pkmn) {
       onclick: async () => {
         state.busy = true;
         render();
-        try { state.last = await rollInitiative(state.rules, state.item); state.last._fresh = true; }
+        try { state.last = await rollInitiative(state.rules, state.item); state.last._fresh = state.last.roller !== "Dice+"; }
         catch (e) { OBR.notification.show(e.message, "ERROR"); }
         finally { state.busy = false; render(); }
       },
@@ -118,9 +120,17 @@ function moveRow(m) {
     disabled: noPP || state.busy,
     title: `${TYPE_PT[m.type] ?? m.type} · ${[m.time, m.range].filter(Boolean).join(" · ")}`,
     onclick: async () => {
-      state.mode = "target";
       state.pending = m.name;
       state.outOfRange = null;
+      if (m.rangeInfo.kind === "area") {
+        // the template appears on the map; whoever is inside when the player clicks gets hit
+        state.mode = "aim";
+        state.targets = [];
+        render();
+        await OBR.broadcast.sendMessage(AIM_START, { attackerId: state.attackerId, moveName: m.name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` }, { destination: "LOCAL" });
+        return;
+      }
+      state.mode = "target";
       const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
       state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
       await updateRanges();
@@ -203,13 +213,23 @@ function buildResult(e) {
     }));
 }
 
-async function roll(ignoreRange) {
+function aimBar() {
+  if (state.mode !== "aim") return null;
+  const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
+  return h("div", { class: "hud-target" },
+    h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), ` · ${move.rangeInfo.label}`),
+    h("div", { class: "small muted" }, state.busy ? "Rolando…" : "Mova o mouse no mapa pra mirar. Clique pra usar em todos dentro da área. Esc cancela."),
+    h("div", { class: "row", style: "margin-top:4px" },
+      h("button", { disabled: state.busy, onclick: () => OBR.broadcast.sendMessage(AIM_ABORT, {}, { destination: "LOCAL" }) }, "Cancelar")));
+}
+
+async function roll(ignoreRange, area = false) {
   state.busy = true;
   render();
   try {
     state.item = await getItem(state.attackerId);
-    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange });
-    state.last._fresh = true;
+    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area });
+    state.last._fresh = state.last.roller !== "Dice+";
     Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null });
     await OBR.player.select([state.attackerId], true); // back to the attacker
   } catch (e) {
@@ -248,6 +268,7 @@ function render() {
     hpBlock(pkmn),
     initiativeBlock(pkmn),
     targetBar(),
+    aimBar(),
     h("div", { class: "hud-moves" }, rules.moveList(pkmn).map(moveRow)),
     resultBlock()));
   fit();
@@ -274,4 +295,14 @@ OBR.onReady(async () => {
     render();
   });
   OBR.player.onChange((p) => onSelection(p.selection));
+  OBR.broadcast.onMessage(AIM_DONE, async ({ data }) => {
+    if (state.mode !== "aim" || data.attackerId !== state.attackerId || data.moveName !== state.pending) return;
+    state.targets = data.targetIds.length ? await OBR.scene.items.getItems(data.targetIds) : [];
+    await roll(true, true);
+  });
+  OBR.broadcast.onMessage(AIM_CANCEL, ({ data }) => {
+    if (state.mode !== "aim" || data.attackerId !== state.attackerId) return;
+    Object.assign(state, { mode: "idle", pending: null, targets: [] });
+    render();
+  });
 });

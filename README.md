@@ -27,6 +27,12 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Iniciativa (Pretty Sordid):** botão 🎲 *Iniciativa* na ficha rápida e na completa (d20 + DES, +5 com Alerta).
   O valor entra direto no Pretty Sordid e a ordem é atualizada. Quando é a vez do Pokémon, a ficha rápida mostra *▶ SUA VEZ*.
   No painel, o mestre tem *Rolar iniciativa de todos*.
+- **Dice+:** se o Dice+ estiver na sala, todas as rolagens (ataque, TR, dano, iniciativa) saem como dados 3D na tela
+  de todo mundo. Sem o Dice+ (ou se ele falhar), a extensão rola sozinha e mostra os dados girando na ficha.
+- **Moves de área:** "Pessoal (cone/linha/raio/semicírculo de X metros)". Ao clicar no Move, a área aparece saindo do
+  Pokémon e segue o mouse, mostrando quem está dentro. Clique pra usar em todos dentro, Esc cancela.
+  O dano é rolado uma vez pra área toda e cada alvo rola o próprio TR. Cone = tão largo quanto o comprimento;
+  linha = 1 quadrado de largura; a distância conta a partir da borda do Pokémon.
 - **Dados na tela:** o d20 e os dados de dano giram e caem no resultado (crítico dourado, 1 natural vermelho).
 - **Animação no mapa:** linha do atacante até cada alvo, anel e número do dano (vermelho = acertou, dourado = crítico,
   cinza tracejado = errou). Todo mundo na sala vê.
