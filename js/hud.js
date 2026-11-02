@@ -1,11 +1,11 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.4.1";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.4.1";
-import { useMove } from "./combat.js?v=0.4.1";
-import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.4.1";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.1";
-import { AIM_DONE, AIM_CANCEL, AIM_ABORT, AIM_STALE, requestAim } from "./area.js?v=0.4.1";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.5.0";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.5.0";
+import { useMove } from "./combat.js?v=0.5.0";
+import { TYPE_COLOR, openSheet, die } from "./ui.js?v=0.5.0";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.0";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.0";
 
 const STATUS_PT = { Burning: "Queimado", Frozen: "Congelado", Paralyzed: "Paralisado", Poisoned: "Envenenado", Asleep: "Dormindo", Confused: "Confuso" };
 
@@ -127,8 +127,12 @@ function moveRow(m) {
         state.mode = "aim";
         state.targets = [];
         render();
-        const ok = await requestAim({ attackerId: state.attackerId, moveName: m.name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` });
-        if (!ok && state.mode === "aim") {
+        state.aimNonce = null;
+        const nonce = await requestAim({ attackerId: state.attackerId, moveName: m.name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` });
+        if (nonce) {
+          state.aimNonce = nonce;
+          await onAim(aimState({ metadata: await OBR.player.getMetadata() })); // in case it already finished
+        } else if (state.mode === "aim") {
           OBR.notification.show(AIM_STALE, "WARNING");
           Object.assign(state, { mode: "idle", pending: null });
           render();
@@ -218,6 +222,20 @@ function buildResult(e) {
     }));
 }
 
+// the background finished (or cancelled) the aim this sheet asked for
+async function onAim(s) {
+  if (!s || state.mode !== "aim" || !state.aimNonce || s.nonce !== state.aimNonce) return;
+  if (s.status === "done") {
+    state.aimNonce = null;
+    state.targets = s.targetIds.length ? await OBR.scene.items.getItems(s.targetIds) : [];
+    await roll(true, true);
+  } else if (s.status === "cancel") {
+    state.aimNonce = null;
+    Object.assign(state, { mode: "idle", pending: null, targets: [] });
+    render();
+  }
+}
+
 function aimBar() {
   if (state.mode !== "aim") return null;
   const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
@@ -299,15 +317,5 @@ OBR.onReady(async () => {
     if (state.mode === "target") await updateRanges();
     render();
   });
-  OBR.player.onChange((p) => onSelection(p.selection));
-  OBR.broadcast.onMessage(AIM_DONE, async ({ data }) => {
-    if (state.mode !== "aim" || data.attackerId !== state.attackerId || data.moveName !== state.pending) return;
-    state.targets = data.targetIds.length ? await OBR.scene.items.getItems(data.targetIds) : [];
-    await roll(true, true);
-  });
-  OBR.broadcast.onMessage(AIM_CANCEL, ({ data }) => {
-    if (state.mode !== "aim" || data.attackerId !== state.attackerId) return;
-    Object.assign(state, { mode: "idle", pending: null, targets: [] });
-    render();
-  });
+  OBR.player.onChange((p) => { onAim(aimState(p)); onSelection(p.selection); });
 });

@@ -1,7 +1,7 @@
 // Rolls go through Dice+ (3D dice on everyone's screen) when it is in the room,
 // otherwise through our own dice. Protocol: https://extensions.owlbear.rodeo/dice-plus
-import { OBR, ID } from "./store.js?v=0.4.1";
-import { d, rollDice } from "./rules.js?v=0.4.1";
+import { OBR, ID } from "./store.js?v=0.5.0";
+import { d, rollDice } from "./rules.js?v=0.5.0";
 
 const SOURCE = ID; // results come back on `${SOURCE}/roll-result`
 const pending = new Map();
@@ -43,7 +43,7 @@ async function dicePlusRoll(notation, showResults) {
   const rollId = crypto.randomUUID();
   const result = new Promise((resolve, reject) => {
     pending.set(rollId, { resolve, reject });
-    setTimeout(() => { if (pending.delete(rollId)) reject(new Error("Dice+ não respondeu")); }, 20000);
+    setTimeout(() => { if (pending.delete(rollId)) reject(new Error("Dice+ não respondeu")); }, 12000);
   });
   await OBR.broadcast.sendMessage("dice-plus/roll-request", {
     rollId,
@@ -62,17 +62,44 @@ const label = (text) => (text ? ` # ${String(text).replace(/[#,]/g, " ").slice(0
 const withBonus = (bonus) => (bonus ? (bonus > 0 ? `+${bonus}` : `${bonus}`) : "");
 const kept = (group) => group.dice.filter((x) => x.kept !== false).map((x) => x.value);
 
-// The roller used by combat: d20(bonus, label) -> { nat }, damage(amount, sides, bonus, label) -> { dice, total }
+// The roller used by combat:
+//   d20(bonus, label) -> { nat }
+//   damage(amount, sides, bonus, label) -> { dice, total }
+//   batch([{ amount, sides, bonus }], label) -> [{ dice }]  everything in ONE throw (one Dice+ animation)
 export async function getRoller({ useDicePlus = true, showResults = true } = {}) {
   const viaDicePlus = useDicePlus && (await dicePlusReady());
   const internal = {
     name: "interno",
     async d20() { return { nat: d(20) }; },
     async damage(amount, sides) { const dice = rollDice(amount, sides); return { dice, total: dice.reduce((a, b) => a + b, 0) }; },
+    async batch(parts) { return parts.map((p) => ({ dice: rollDice(p.amount, p.sides) })); },
   };
   if (!viaDicePlus) return internal;
   return {
     name: "Dice+",
+    // "1d20+7, 1d20+7, 3d10+6 # Hyper Voice": Dice+ throws all of it at once; its groups come back in
+    // the same order, matched here part by part by die type
+    async batch(parts, text) {
+      const out = parts.map(() => null);
+      const thrown = parts.map((p, i) => ({ ...p, i })).filter((p) => p.amount > 0 && p.sides >= 2);
+      if (thrown.length) {
+        try {
+          const notation = thrown.map((p) => `${p.amount}d${p.sides}${withBonus(p.bonus)}`).join(", ") + label(text);
+          const r = await dicePlusRoll(notation, showResults);
+          const groups = r.groups.filter((g) => !g.isNegative);
+          let cursor = 0;
+          for (const p of thrown) {
+            const at = groups.findIndex((g, gi) => gi >= cursor && g.diceType === `d${p.sides}`);
+            if (at < 0) continue;
+            const dice = kept(groups[at]);
+            if (dice.length === p.amount) out[p.i] = { dice };
+            cursor = at + 1;
+          }
+        } catch {}
+      }
+      // anything Dice+ didn't give back (or d1) is rolled here
+      return parts.map((p, i) => out[i] ?? { dice: rollDice(p.amount, p.sides) });
+    },
     async d20(bonus, text) {
       try {
         const r = await dicePlusRoll(`1d20${withBonus(bonus)}${label(text)}`, showResults);

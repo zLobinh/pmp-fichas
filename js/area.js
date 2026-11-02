@@ -1,23 +1,32 @@
 // Area templates for "Pessoal (cone/linha/raio/semicírculo de X metros)" moves.
 // Runs in the background page: a temporary tool draws the template from the Pokémon toward the
 // mouse, shows who is inside, and on click hands the targets back to the sheet that asked.
-import { OBR, SDK, ID, asset } from "./store.js?v=0.4.1";
+//
+// Sheet -> background: broadcast AIM_START / AIM_ABORT.
+// Background -> sheet: the aim state in this player's metadata (AIM_KEY), which every page of the
+// extension sees through OBR.player.onChange. (Broadcasts from the background back to a popover
+// didn't arrive reliably.)
+import { OBR, SDK, ID, asset } from "./store.js?v=0.5.0";
 
 export const AIM_START = `${ID}/aim-start`;
-export const AIM_DONE = `${ID}/aim-done`;
-export const AIM_CANCEL = `${ID}/aim-cancel`;
-export const AIM_ACK = `${ID}/aim-ack`;
+export const AIM_ABORT = `${ID}/aim-abort`;
+export const AIM_KEY = `${ID}/aim`;
 
-// asks the background to start aiming; resolves false if it doesn't answer (an old cached
-// background page, or the extension not loaded in this browser)
-export function requestAim(req) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { off(); resolve(false); }, 2000);
-    const off = OBR.broadcast.onMessage(AIM_ACK, ({ data }) => {
-      if (data?.attackerId === req.attackerId && data?.moveName === req.moveName) { clearTimeout(timer); off(); resolve(true); }
-    });
-    OBR.broadcast.sendMessage(AIM_START, req, { destination: "LOCAL" }).catch(() => { clearTimeout(timer); off(); resolve(false); });
-  });
+// { nonce, status: "active" | "done" | "cancel", attackerId, moveName, targetIds }
+export const aimState = (player) => player?.metadata?.[AIM_KEY] ?? null;
+const setAimState = (s) => OBR.player.setMetadata({ [AIM_KEY]: { ...s, at: Date.now() } });
+
+// asks the background to start aiming; resolves the nonce, or null if it doesn't answer
+// (an old cached background page, or the extension not loaded in this browser)
+export async function requestAim(req) {
+  const nonce = crypto.randomUUID();
+  await OBR.broadcast.sendMessage(AIM_START, { ...req, nonce }, { destination: "LOCAL" });
+  for (let i = 0; i < 25; i++) {
+    await new Promise((r) => setTimeout(r, 120));
+    const s = aimState({ metadata: await OBR.player.getMetadata() });
+    if (s?.nonce === nonce) return s.status === "active" || s.status === "done" ? nonce : null;
+  }
+  return null;
 }
 export const AIM_STALE = "A parte da extensão que desenha a área não respondeu. Recarregue a página do Owlbear (F5) e tente de novo.";
 const TOOL = `${ID}/aim-tool`;
@@ -146,11 +155,13 @@ async function finish(confirmed) {
   aim = null;
   if (!a) return;
   await OBR.scene.local.deleteItems([a.templateId, a.labelId]).catch(() => {});
-  if (confirmed) {
-    await OBR.broadcast.sendMessage(AIM_DONE, { attackerId: a.attacker.id, moveName: a.moveName, targetIds: a.targets.map((t) => t.id) }, { destination: "LOCAL" });
-  } else {
-    await OBR.broadcast.sendMessage(AIM_CANCEL, { attackerId: a.attacker.id, moveName: a.moveName }, { destination: "LOCAL" });
-  }
+  await setAimState({
+    nonce: a.nonce,
+    status: confirmed ? "done" : "cancel",
+    attackerId: a.attacker.id,
+    moveName: a.moveName,
+    targetIds: confirmed ? a.targets.map((t) => t.id) : [],
+  });
   await OBR.tool.activateTool(a.previousTool || "rodeo.owlbear.tool/move").catch(() => {});
   await OBR.tool.remove(TOOL).catch(() => {});
   await OBR.tool.removeMode(MODE).catch(() => {});
@@ -158,14 +169,16 @@ async function finish(confirmed) {
 
 export { templatePolygon, touches }; // for tools/test-rules.html
 
-export const AIM_ABORT = `${ID}/aim-abort`;
 export const abortAim = () => finish(false);
 
-// { attackerId, moveName, shape, meters, label }
+// tells the sheet the aim failed (so it stops waiting)
+export const failAim = (req) => setAimState({ nonce: req.nonce, status: "cancel", attackerId: req.attackerId, moveName: req.moveName, targetIds: [] });
+
+// { nonce, attackerId, moveName, shape, meters, label }
 export async function startAim(req) {
   if (aim) await finish(false);
   const [attacker] = await OBR.scene.items.getItems([req.attackerId]);
-  if (!attacker) return;
+  if (!attacker) throw new Error("Pokémon não encontrado na cena.");
   const [dpi, scale, oneCell] = await Promise.all([
     OBR.scene.grid.getDpi(),
     OBR.scene.grid.getScale(),
@@ -189,7 +202,7 @@ export async function startAim(req) {
     .backgroundColor("#1e2231").backgroundOpacity(0.9).fillColor("#ffffff").pointerDirection("DOWN").layer("POINTER").disableHit(true).build();
 
   aim = {
-    attacker, moveName: req.moveName, shape: req.shape, label: req.label, L, cell, previousTool,
+    nonce: req.nonce, attacker, moveName: req.moveName, shape: req.shape, label: req.label, L, cell, previousTool,
     templateId: template.id, labelId: label.id, targets: [],
     tokens: await candidates(),
     radiusOf: (t) => (sizeOf(t) * cell) / 2,
@@ -197,6 +210,7 @@ export async function startAim(req) {
   await OBR.scene.local.addItems([template, label]);
   await setup();
   await OBR.tool.activateTool(TOOL);
+  await setAimState({ nonce: req.nonce, status: "active", attackerId: attacker.id, moveName: req.moveName, targetIds: [] });
   // a radius around the Pokémon doesn't need aiming: show who is inside right away
   await aimAt({ x: origin.x + 1, y: origin.y });
 }

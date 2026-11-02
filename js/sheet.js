@@ -1,11 +1,11 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.4.1";
-import { getRoller } from "./dice.js?v=0.4.1";
-import { AIM_DONE, AIM_CANCEL, AIM_STALE, requestAim } from "./area.js?v=0.4.1";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.4.1";
-import { useMove, describe } from "./combat.js?v=0.4.1";
-import { TYPE_COLOR, die } from "./ui.js?v=0.4.1";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.4.1";
+import { OBR, ID, SHEET_KEY, STATUSES, loadRules, getSheet, getItem, updatePokemon, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.5.0";
+import { getRoller } from "./dice.js?v=0.5.0";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.5.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.5.0";
+import { useMove, describe } from "./combat.js?v=0.5.0";
+import { TYPE_COLOR, die } from "./ui.js?v=0.5.0";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.5.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -169,10 +169,13 @@ async function rollCheck(label, bonus) {
 async function doMove(name, ignoreRange, areaTargets) {
   const m = state.rules.moveData(getSheet(state.item).pkmn, name);
   if (m.rangeInfo.kind === "area" && !areaTargets) {
-    state.aiming = name;
-    const ok = await requestAim({ attackerId: itemId, moveName: name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` });
-    if (ok) OBR.notification.show(`${m.label}: mire a área no mapa e clique pra usar (Esc cancela).`, "INFO");
-    else { state.aiming = null; OBR.notification.show(AIM_STALE, "WARNING"); }
+    state.aiming = null;
+    const nonce = await requestAim({ attackerId: itemId, moveName: name, shape: m.rangeInfo.shape, meters: m.rangeInfo.meters, label: `${m.label.replace(/ PMP$/, "")} (${m.rangeInfo.label})` });
+    if (nonce) {
+      state.aiming = nonce;
+      OBR.notification.show(`${m.label}: mire a área no mapa e clique pra usar (Esc cancela).`, "INFO");
+      await onAim(aimState({ metadata: await OBR.player.getMetadata() }));
+    } else OBR.notification.show(AIM_STALE, "WARNING");
     return;
   }
   state.busy = true;
@@ -289,14 +292,17 @@ OBR.onReady(async () => {
     render();
   });
   OBR.player.onChange(async (player) => {
+    onAim(aimState(player));
     await refreshTargets(player.selection ?? []);
     render();
   });
-  OBR.broadcast.onMessage(AIM_DONE, async ({ data }) => {
-    if (state.aiming !== data.moveName || data.attackerId !== itemId) return;
-    state.aiming = null;
-    const targets = data.targetIds.length ? await OBR.scene.items.getItems(data.targetIds) : [];
-    await doMove(data.moveName, true, targets);
-  });
-  OBR.broadcast.onMessage(AIM_CANCEL, () => { state.aiming = null; });
 });
+
+// the background finished (or cancelled) the aim this sheet asked for
+async function onAim(s) {
+  if (!s || !state.aiming || s.nonce !== state.aiming) return;
+  state.aiming = null;
+  if (s.status !== "done") return;
+  const targets = s.targetIds.length ? await OBR.scene.items.getItems(s.targetIds) : [];
+  await doMove(s.moveName, true, targets);
+}

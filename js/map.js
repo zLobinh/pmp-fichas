@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.4.1";
-import { fmtM } from "./rules.js?v=0.4.1";
-import { getRoller } from "./dice.js?v=0.4.1";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.5.0";
+import { fmtM } from "./rules.js?v=0.5.0";
+import { getRoller } from "./dice.js?v=0.5.0";
 
 // ------------------------------------------------------------------ distance & range
 

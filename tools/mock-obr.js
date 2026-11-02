@@ -28,6 +28,7 @@ items[3].position = { x: 300, y: 300 }; // Oddish: 2 squares right, 2 down (diag
 let selection = ["b"];
 const channels = {};
 let sceneMeta = {};
+let playerMeta = {};
 let roomMeta = {};
 const emit = (k, v) => listeners[k].forEach((f) => f(v));
 const clone = (x) => structuredClone(x);
@@ -65,7 +66,9 @@ const OBR = {
     getRole: async () => "GM",
     getName: async () => "Mestre",
     getSelection: async () => [...selection],
-    select: async (ids) => { selection = ids; emit("player", { selection }); },
+    select: async (ids) => { selection = ids; emit("player", { selection, metadata: clone(playerMeta) }); },
+    getMetadata: async () => clone(playerMeta),
+    setMetadata: async (m) => { playerMeta = { ...playerMeta, ...m }; emit("player", { selection, metadata: clone(playerMeta) }); },
     onChange: (f) => listeners.player.push(f),
   },
   room: {
@@ -94,5 +97,15 @@ const OBR = {
 };
 
 // test hooks
-window.__mock = { items, setSelection: (ids) => { selection = ids; emit("player", { selection }); } };
+window.__mock = {
+  items,
+  setSelection: (ids) => { selection = ids; emit("player", { selection, metadata: clone(playerMeta) }); },
+  // stand-in for the background page: answers aim requests through the player metadata
+  fakeBackground: (targetIds, delay = 600) => {
+    (channels["com.pmp-fichas/aim-start"] ??= []).push(async ({ data }) => {
+      await OBR.player.setMetadata({ "com.pmp-fichas/aim": { nonce: data.nonce, status: "active", attackerId: data.attackerId, moveName: data.moveName, targetIds: [] } });
+      setTimeout(() => OBR.player.setMetadata({ "com.pmp-fichas/aim": { nonce: data.nonce, status: "done", attackerId: data.attackerId, moveName: data.moveName, targetIds } }), delay);
+    });
+  },
+};
 export default OBR;
