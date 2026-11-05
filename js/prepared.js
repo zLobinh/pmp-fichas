@@ -4,11 +4,11 @@
 //   - out of range (melee or ranged): walks the shortest way into range, paying the movement,
 //     then attacks;
 //   - not enough movement: the prepared action is cancelled and the player chooses again.
-import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.3";
-import { fmtM } from "./rules.js?v=0.8.3";
-import { checkRange } from "./map.js?v=0.8.3";
-import { useMove } from "./combat.js?v=0.8.3";
-import { approach, movement, moveToken, jumpOpts } from "./tactics.js?v=0.8.3";
+import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.4";
+import { fmtM } from "./rules.js?v=0.8.4";
+import { checkRange } from "./map.js?v=0.8.4";
+import { useMove } from "./combat.js?v=0.8.4";
+import { approach, movement, moveToken, jumpOpts } from "./tactics.js?v=0.8.4";
 
 const fresh = async (id) => (await OBR.scene.items.getItems([id]))[0];
 

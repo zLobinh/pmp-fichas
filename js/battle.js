@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.3";
-import { d } from "./rules.js?v=0.8.3";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.4";
+import { d } from "./rules.js?v=0.8.4";
 
 // ------------------------------------------------------------------ conditions
 
@@ -687,8 +687,11 @@ export function watchMarks(rules) {
         const left = t.position.x - w / 2;
         // the bar's fill is stepped to 5% so tiny HP changes don't rebuild it
         const step = Math.round(pct * 20) / 20;
-        want.push({ ...base, kind: "barbg", x: left, y: top, w, h: hgt, key: `barbg:${t.id}:${Math.round(w)}:${t.visible}` });
-        if (step > 0) want.push({ ...base, kind: "bar", x: left, y: top, w: w * step, h: hgt, color: hpColor(pct), key: `bar:${t.id}:${step}:${Math.round(w)}:${t.visible}` });
+        // nothing overlaps (Owlbear may reorder attachments, and a background on top of the fill made
+        // the bar look empty): filled part, empty part beside it, and an outline with no fill
+        if (step > 0) want.push({ ...base, kind: "bar", x: left, y: top, w: w * step, h: hgt, color: hpColor(pct), key: `bar:${t.id}:${step}:${hpColor(pct)}:${Math.round(w)}:${t.visible}` });
+        if (step < 1) want.push({ ...base, kind: "barempty", x: left + w * step, y: top, w: w * (1 - step), h: hgt, key: `barempty:${t.id}:${step}:${Math.round(w)}:${t.visible}` });
+        want.push({ ...base, kind: "barframe", x: left, y: top, w, h: hgt, key: `barframe:${t.id}:${Math.round(w)}:${t.visible}` });
         if (fainted) want.push({ ...base, kind: "faint", key: `faint:${t.id}:${Math.round(size)}:${t.visible}` });
         const text = fainted ? "😵 Desmaiado" : marksText(sheet);
         if (text) want.push({ ...base, kind: "label", y: top + hgt + dpi * 0.04, text, key: `label:${t.id}:${text}:${t.visible}` });
@@ -707,10 +710,11 @@ export function watchMarks(rules) {
         if (x.kind === "faint") {
           add.push(common(buildShape().shapeType("CIRCLE").width(x.size * 0.95).height(x.size * 0.95).position(x.pos)
             .fillColor("#30303a").fillOpacity(0.62).strokeColor("#30303a").strokeOpacity(0.8).strokeWidth(dpi * 0.03), x).build());
-        } else if (x.kind === "barbg" || x.kind === "bar") {
+        } else if (x.kind === "bar" || x.kind === "barempty" || x.kind === "barframe") {
+          const fill = x.kind === "bar" ? x.color : "#1b1d27";
           add.push(common(buildShape().shapeType("RECTANGLE").width(x.w).height(x.h).position({ x: x.x, y: x.y })
-            .fillColor(x.kind === "bar" ? x.color : "#1b1d27").fillOpacity(x.kind === "bar" ? 0.95 : 0.85)
-            .strokeColor("#000000").strokeOpacity(x.kind === "bar" ? 0 : 0.6).strokeWidth(x.kind === "bar" ? 0 : 2), x).zIndex(x.kind === "bar" ? 2 : 1).build());
+            .fillColor(fill).fillOpacity(x.kind === "barframe" ? 0 : x.kind === "bar" ? 0.95 : 0.85)
+            .strokeColor("#000000").strokeOpacity(x.kind === "barframe" ? 0.7 : 0).strokeWidth(x.kind === "barframe" ? 2 : 0), x).build());
         } else {
           add.push(common(buildLabel().plainText(x.text).position({ x: x.pos.x, y: x.y })
             .backgroundColor("#1e2231").backgroundOpacity(0.85).fillColor("#ffffff").pointerDirection("UP"), x).build());

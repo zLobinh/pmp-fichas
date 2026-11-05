@@ -4,19 +4,19 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.3";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.8.3";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.8.3";
-import { getRoller } from "./dice.js?v=0.8.3";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.4";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.8.4";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.8.4";
+import { getRoller } from "./dice.js?v=0.8.4";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.8.3";
+} from "./battle.js?v=0.8.4";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken,
-} from "./tactics.js?v=0.8.3";
+} from "./tactics.js?v=0.8.4";
 
 export { TurnError };
 

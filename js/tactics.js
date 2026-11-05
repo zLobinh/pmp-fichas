@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.3";
-import { d, fmtM } from "./rules.js?v=0.8.3";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.8.3";
-import { pointMeters, altitudeOf, checkRange } from "./map.js?v=0.8.3";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.4";
+import { d, fmtM } from "./rules.js?v=0.8.4";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.8.4";
+import { pointMeters, altitudeOf, checkRange } from "./map.js?v=0.8.4";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);

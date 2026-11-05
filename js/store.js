@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.8.3";
+import { Rules } from "./rules.js?v=0.8.4";
 
 export { OBR, SDK };
 export const ID = "com.pmp-fichas";
@@ -21,7 +21,7 @@ export const STATUSES = {
 };
 
 // set by tools/bump_version.py
-export const VERSION = "0.8.3";
+export const VERSION = "0.8.4";
 
 // absolute URL of a file of this extension (works on a GitHub Pages sub-path), tagged with the
 // version so browsers don't keep serving the previous one from their cache
