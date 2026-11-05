@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>Importar ficha</title>
-    <link rel="stylesheet" href="css/style.css?v=0.6.0" />
+    <link rel="stylesheet" href="css/style.css?v=0.7.0" />
   </head>
   <body>
     <div class="app">
@@ -16,6 +16,15 @@
         <label class="row small" style="margin-top: 6px">
           <input type="checkbox" id="rename" checked /> Usar o nome do Pokémon no token
         </label>
+        <label class="row small" id="teamRow" style="margin-top: 6px; display: none">
+          Equipe:
+          <select id="team">
+            <option value="inimigos">Inimigos</option>
+            <option value="jogadores">Jogadores</option>
+            <option value="neutros">Neutros</option>
+          </select>
+          <span class="muted">(dá pra trocar depois na ficha)</span>
+        </label>
         <div class="err" id="err"></div>
         <div class="row">
           <span class="spacer"></span>
@@ -24,6 +33,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="js/import.js?v=0.6.0"></script>
+    <script type="module" src="js/import.js?v=0.7.0"></script>
   </body>
 </html>

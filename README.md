@@ -59,7 +59,18 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   Cerca de 350 dos 838 Moves têm efeito automático; o resto mostra a descrição e o mestre aplica na ficha completa.
 - **Helping Hand:** ao escolher os alvos de um ataque, aparecem seus Pokémon com Helping Hand, reação livre e a até
   18 m. Marcando, eles gastam a reação e 1 PP: +1d6 no acerto e metade a mais de dados de dano (1 dado: rola 2x).
-- **Token:** fica cinza quando desmaia e mostra uma etiqueta com as condições ativas.
+- **Equipes e donos:** cada ficha tem uma equipe (Jogadores, Inimigos ou Neutros) e um dono. Jogador que importa
+  vira dono e entra em Jogadores; o mestre escolhe a equipe na importação e pode trocar equipe e dono na ficha
+  completa. Cada jogador só usa os próprios Pokémon (ficha rápida e Moves).
+- **O que os jogadores veem:** dos Pokémon de outra equipe, só nome, tipo, barra de HP (sem números), condições e
+  buffs/debuffs. A CA e o HP dos inimigos somem do registro, das notificações e da lista de alvos. O mestre vê tudo.
+- **Token:** barra de HP embaixo de todo Pokémon com ficha, etiqueta com condições e estágios (▲ Atq +2, ▼ Def −1),
+  cinza quando desmaia. Pokémon desmaiado sai da iniciativa do Pretty Sordid (se era a vez dele, passa pro próximo).
+- **Mudanças de Status (📊):** popup igual ao do app, com os 8 estágios (−6 a +6) e o efeito de cada um, mais os
+  Pontos de Amplificação e Redução de Dano (passos de 0,5, regras da pág. 57-58). Tudo entra nas contas.
+- **Helping Hand como Move:** usado num aliado, fica esperando no aliado e vale só pro próximo ataque dele (ou até o
+  fim da rodada). Ajuda = +1d6 no acerto e +2 pontos de Amplificação (1 ponto se o Move tem um dado só).
+- **Ficha rápida arrastável:** segure o ⠿ no título, arraste e solte; ela reabre ali e lembra o lugar.
 - **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre,
   incluindo *Encerrar combate* (zera estágios e ações, tira condições voláteis, Gravemente Envenenado vira Envenenado).
 - Todo mundo na sala recebe uma notificação de cada rolagem.

@@ -1,13 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.6.0";
-import { getRoller } from "./dice.js?v=0.6.0";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.6.0";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage } from "./battle.js?v=0.6.0";
-import { TurnError } from "./combat.js?v=0.6.0";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.6.0";
-import { useMove, describe } from "./combat.js?v=0.6.0";
-import { TYPE_COLOR, die } from "./ui.js?v=0.6.0";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.6.0";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.7.0";
+import { getRoller } from "./dice.js?v=0.7.0";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.7.0";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.7.0";
+import { openStages } from "./ui.js?v=0.7.0";
+import { TurnError } from "./combat.js?v=0.7.0";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.7.0";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.7.0";
+import { TYPE_COLOR, die } from "./ui.js?v=0.7.0";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.7.0";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -99,19 +100,59 @@ function infoCard(pkmn) {
         }, `${c.icon} ${c.label}`))));
 }
 
+// summary of the stages and damage points; editing happens in the "Mudanças de Status" popup
 function stagesCard(pkmn) {
-  const change = (k, delta) => updateSheet(itemId, (s) => addStage(s.pkmn, k, delta));
+  const stages = Object.entries(pkmn.stages ?? {}).filter(([, v]) => v);
+  const amp = ampPoints(pkmn), red = redPoints(pkmn);
   return h("div", { class: "card" },
-    h("div", { class: "row" }, h("h2", { style: "margin:0" }, "Mudanças de status (estágios)"), h("span", { class: "spacer" }),
-      state.editable && Object.keys(pkmn.stages ?? {}).length ? h("button", { class: "small", onclick: () => updateSheet(itemId, (s) => { s.pkmn.stages = {}; }) }, "Zerar") : null),
-    h("div", { class: "stage-grid", style: "margin-top:6px" },
-      Object.entries(STAGES).map(([k, label]) => {
-        const v = stage(pkmn, k);
-        return h("div", { class: "stage", title: label },
-          h("span", { class: "muted" }, STAGE_SHORT[k]),
-          h("b", { class: v > 0 ? "ok" : v < 0 ? "no" : "" }, v > 0 ? `+${v}` : `${v}`),
-          state.editable ? h("div", {}, h("button", { onclick: () => change(k, -1) }, "−"), h("button", { onclick: () => change(k, 1) }, "+")) : null);
-      })));
+    h("div", { class: "row" }, h("h2", { style: "margin:0" }, "Mudanças de status"), h("span", { class: "spacer" }),
+      h("button", { class: "small", onclick: () => openStages(itemId) }, state.editable ? "📊 Editar" : "📊 Ver")),
+    h("div", { class: "row", style: "margin-top:6px;gap:4px" },
+      stages.length || amp || red
+        ? [
+            stages.map(([k, v]) => h("span", { class: `chip ${v > 0 ? "up" : "down"}`, title: STAGES[k] }, `${STAGE_SHORT[k]} ${v > 0 ? "+" : ""}${v}`)),
+            amp ? h("span", { class: "chip up", title: pointsText(amp, 0) }, `Amplificação ${String(amp).replace(".", ",")}`) : null,
+            red ? h("span", { class: "chip down", title: pointsText(0, red) }, `Redução ${String(red).replace(".", ",")}`) : null,
+          ]
+        : h("span", { class: "muted small" }, "Nenhuma mudança.")));
+}
+
+// GM only: which team the Pokémon is on and which player controls it
+function teamCard(sheet) {
+  const set = (patch) => updateSheet(itemId, (s) => Object.assign(s, patch));
+  return h("div", { class: "card row small", style: "gap:8px" },
+    h("label", { class: "row" }, "Equipe ",
+      h("select", { onchange: (e) => set({ team: e.target.value }) },
+        Object.entries(TEAMS).map(([k, label]) => { const o = h("option", { value: k }, label); if (teamOf(sheet) === k) o.selected = true; return o; }))),
+    h("label", { class: "row" }, "Controlado por ",
+      h("select", { onchange: (e) => set({ owner: e.target.value }) },
+        [{ id: OBR.player.id, name: "Mestre" }, ...state.party.filter((p) => p.role !== "GM")].map((p) => {
+          const o = h("option", { value: p.id }, p.name);
+          if (sheet.owner === p.id) o.selected = true;
+          return o;
+        }))));
+}
+
+// what a player sees of an enemy: no numbers, no AC, no moves
+function limitedView(sheet) {
+  const { rules } = state;
+  const pkmn = sheet.pkmn;
+  const pct = Math.max(0, Math.min(100, (pkmn.hp.current / Math.max(1, rules.maxHP(pkmn))) * 100));
+  const cond = conditionsOf(sheet);
+  const stages = Object.entries(pkmn.stages ?? {}).filter(([, v]) => v);
+  return h("div", {},
+    h("div", { class: "card" },
+      h("div", { class: "row" }, rules.types(pkmn).map(typeTag), h("span", { class: "spacer" }), h("span", { class: "muted small" }, TEAMS[teamOf(sheet)])),
+      h("div", { class: "hpbar", style: "margin-top:8px" }, h("i", { class: pct <= 25 ? "crit" : pct <= 50 ? "low" : "", style: `width:${pct}%` })),
+      pkmn.hp.current <= 0 ? h("div", { class: "no small", style: "font-weight:700" }, "DESMAIADO") : null),
+    h("div", { class: "card" },
+      h("h2", {}, "Condições e mudanças de status"),
+      Object.keys(cond).length || stages.length
+        ? h("div", { class: "row", style: "gap:4px" },
+            Object.keys(cond).map((k) => h("span", { class: "chip cond" }, `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`)),
+            stages.map(([k, v]) => h("span", { class: `chip ${v > 0 ? "up" : "down"}` }, `${STAGE_SHORT[k]} ${v > 0 ? "+" : ""}${v}`)))
+        : h("div", { class: "muted small" }, "Nada no momento.")),
+    h("div", { class: "muted small", style: "padding:4px 2px" }, "Ficha de Pokémon de outra equipe: só o mestre vê os números."));
 }
 
 function targetsCard() {
@@ -121,7 +162,8 @@ function targetsCard() {
     state.targets.length
       ? h("div", { class: "targets" }, state.targets.map((t) => {
           const p = getSheet(t)?.pkmn;
-          return h("span", { class: "chip on" }, t.name || "Token", p ? ` · CA ${rules.ac(p)} · HP ${p.hp.current}/${rules.maxHP(p)}` : " · sem ficha");
+          const full = p && canSeeFull(getSheet(t), state.viewer);
+          return h("span", { class: "chip on" }, t.name || "Token", !p ? " · sem ficha" : full ? ` · CA ${rules.ac(p)} · HP ${p.hp.current}/${rules.maxHP(p)}` : "");
         }))
       : h("div", { class: "muted small" }, "Selecione os alvos no mapa (Shift+clique pra vários). Sem alvo, o Move só rola o dano."));
 }
@@ -174,10 +216,11 @@ function buildResult(e) {
     if (!r.target) return h("div", {}, r.note);
     const nat = r.attack?.nat ?? (r.save && !r.save.unknown ? r.save.nat : null);
     const bits = [nat != null ? die(nat, { animate, kind: r.attack?.crit ? "crit" : r.attack?.fumble ? "fumble" : "" }) : null, " ", h("b", {}, r.target), ": "];
-    if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (d20 ${r.attack.nat} → ${r.attack.total}${r.attack.ac != null ? ` vs CA ${r.attack.ac}` : ""}) `);
+    const full = seesTarget(r, state.viewer);
+    if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (d20 ${r.attack.nat} → ${r.attack.total}${r.attack.ac != null && full ? ` vs CA ${r.attack.ac}` : ""}) `);
     if (r.save) bits.push(r.save.effectOnly ? "efeito secundário: " : "", r.save.unknown ? `TR ${r.save.attr} CD ${r.save.dc} (alvo sem ficha, role na mesa) ` : h("span", { class: r.save.success ? "no" : "ok" }, `TR ${r.save.attr} ${r.save.total} vs CD ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
     if (r.damage) bits.push(h("b", {}, `${r.damage.final} de dano`), ` [${r.damage.dice.map((x) => x.join("+")).join(" | ")}]${r.damage.effLabel ? ` ${r.damage.effLabel}` : ""}${r.damage.half ? " (metade)" : ""}`);
-    if (r.hpAfter) bits.push(` → HP ${r.hpAfter}`);
+    if (r.hpAfter && full) bits.push(` → HP ${r.hpAfter}`);
     return h("div", {}, bits);
   });
   return h("div", { class: "result" }, h("div", { class: "muted small" }, `${e.move}${e.pp ? ` · PP ${e.pp}` : ""}`), lines);
@@ -293,10 +336,18 @@ function render() {
   }
   const pkmn = sheet.pkmn;
   const { rules } = state;
-  title.textContent = `${state.item.name || rules.name(pkmn)} · Nv ${rules.level(pkmn)}`;
   const scroll = root.scrollTop;
+  // a player looking at someone else's enemy: name, HP bar and buffs/debuffs only
+  if (!canSeeFull(sheet, state.viewer)) {
+    title.textContent = state.item.name || rules.name(pkmn);
+    root.replaceChildren(limitedView(sheet));
+    root.scrollTop = scroll;
+    return;
+  }
+  title.textContent = `${state.item.name || rules.name(pkmn)} · Nv ${rules.level(pkmn)}`;
   root.replaceChildren(...[
     h("div", { class: "muted small" }, `${pkmn.species.current}${pkmn.variant && pkmn.variant !== pkmn.species.current ? ` (${pkmn.variant})` : ""}${state.editable ? "" : " · só leitura"}`),
+    state.isGM ? teamCard(sheet) : null,
     hpCard(pkmn),
     statsCard(pkmn),
     infoCard(pkmn),
@@ -317,6 +368,8 @@ OBR.onReady(async () => {
   state.item = await getItem(itemId);
   state.editable = await canEdit(getSheet(state.item));
   state.isGM = (await OBR.player.getRole()) === "GM";
+  state.viewer = { id: OBR.player.id, role: state.isGM ? "GM" : "PLAYER" };
+  state.party = state.isGM ? await OBR.party.getPlayers() : [];
   await refreshTargets();
   render();
   OBR.scene.items.onChange(async (items) => {

@@ -1,13 +1,14 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.6.0";
-import { describe } from "./combat.js?v=0.6.0";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.6.0";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.6.0";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.6.0";
-import { watchTurns, watchMarks } from "./battle.js?v=0.6.0";
-import { loadRules } from "./store.js?v=0.6.0";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.7.0";
+import { describe } from "./combat.js?v=0.7.0";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.7.0";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.7.0";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.7.0";
+import { watchTurns, watchMarks } from "./battle.js?v=0.7.0";
+import { loadRules } from "./store.js?v=0.7.0";
 
 let lastSelection = "";
+let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
 
 // selecting one Pokémon you control opens the quick sheet (an open one follows the selection itself)
 async function onSelection(selection) {
@@ -44,7 +45,13 @@ OBR.onReady(() => {
         filter: { max: 1, every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
       },
     ],
-    onClick: (context) => { markHudAlive(); openHud(context.items[0].id); },
+    onClick: async (context, elementId) => {
+      const item = context.items[0];
+      // each player controls only their own Pokémon; anyone else's opens the (limited) sheet
+      if (!(await canEdit(getSheet(item)))) return openSheet(item.id, elementId);
+      markHudAlive();
+      openHud(item.id);
+    },
   });
 
   OBR.contextMenu.create({
@@ -80,6 +87,7 @@ OBR.onReady(() => {
 
   // turn start/end effects and token marks run on ONE browser: the GM's
   OBR.player.getRole().then(async (role) => {
+    viewer = { id: OBR.player.id, role };
     if (role !== "GM") return;
     const rules = await loadRules();
     const start = () => { watchTurns(rules); watchMarks(rules); };
@@ -90,7 +98,7 @@ OBR.onReady(() => {
   });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
-    const text = describe(data);
+    const text = describe(data, viewer);
     OBR.notification.show(text.length > 220 ? text.slice(0, 217) + "…" : text, "INFO");
   });
 });

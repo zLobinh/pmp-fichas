@@ -4,14 +4,15 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.6.0";
-import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.6.0";
-import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.6.0";
-import { getRoller } from "./dice.js?v=0.6.0";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.7.0";
+import { TYPE_PT, ATTR_PT, signed } from "./rules.js?v=0.7.0";
+import { checkRange, OutOfRange, sendFx } from "./map.js?v=0.7.0";
+import { getRoller } from "./dice.js?v=0.7.0";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, PRETTY, TurnError,
-} from "./battle.js?v=0.6.0";
+  allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
+} from "./battle.js?v=0.7.0";
 
 export { TurnError };
 
@@ -75,10 +76,29 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     return entry;
   }
 
-  // Helping Hand: +1d6 on the attack rolls, damage dice +half (1 die: roll twice, keep the higher)
+  // Helping Hand used as a move: the bonus waits on the ally for its NEXT attack only
+  if (moveName === "Helping Hand") {
+    const allyTargets = targetItems.filter((t) => getSheet(t) && t.id !== attackerItem.id && allies(aSheet, getSheet(t)));
+    if (!allyTargets.length) throw new Error("Helping Hand: escolha um aliado (Pokémon da mesma equipe) como alvo.");
+    await updateSheet(attackerItem.id, (s) => {
+      if (settings.autoPP && typeof move.pp === "number") s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - 1);
+      spend(s, cost);
+    });
+    const round = Number((await OBR.scene.getMetadata())["com.pretty-initiative/roundCount"] ?? 0);
+    for (const t of allyTargets) {
+      await updateSheet(t.id, (s) => { s.battle.helped = { by: who, round }; });
+      entry.results.push({ targetId: t.id, target: t.name, effects: ["🤝 Helping Hand pronto pro próximo ataque (+1d6 no acerto, mais dados de dano)"] });
+    }
+    await pushLog(entry);
+    return entry;
+  }
+
+  // Helping Hand on this attack: chosen helpers (their reaction) and/or one waiting on the attacker.
+  // +1d6 on the attack rolls; damage: +2 amplification points (1 point with a single die), pág. 57
   const helpers = opts.helpers ?? [];
-  const helped = helpers.length > 0;
-  if (helped) entry.notes.push(`Helping Hand de ${helpers.map((h) => h.name).join(", ")}`);
+  const pendingHelp = (move.attackBonus != null || move.damage) ? aSheet.battle?.helped : null;
+  const helped = helpers.length > 0 || !!pendingHelp;
+  if (helped) entry.notes.push(`Helping Hand de ${[...helpers.map((h) => h.name), ...(pendingHelp ? [pendingHelp.by] : [])].join(", ")}`);
 
   // modifiers from the attacker's stages
   const acc = stage(attacker, "Accuracy");
@@ -91,11 +111,18 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   // 2) every die of the move in ONE throw
   const dmg = move.damage;
   const hasDice = dmg && dmg.amount && dmg.dice;
-  const dmgAmount = hasDice ? dmg.amount + (helped && dmg.amount > 1 ? Math.floor(dmg.amount / 2) : 0) : 0;
-  const rerollBest = helped && hasDice && dmg.amount === 1; // Helping Hand on a single die
+  // Pontos de Amplificação/Redução (the app's "Mudanças de Status" screen + Helping Hand)
+  const aProfHalf = Math.max(1, Math.floor(rules.proficiency(attacker) / 2));
+  const amp = ampPoints(attacker) + (helped && hasDice ? (dmg.amount > 1 ? 2 : 1) : 0);
+  const pts = pointsSummary(amp, redPoints(attacker));
+  const amped = hasDice ? amplifyDice(dmg.amount, dmg.dice, pts.ampGroups) : { amount: 0, bonus: 0 };
+  const dmgAmount = amped.amount;
+  const flatPts = amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0);
+  const reroll = pts.ampReroll && !pts.redReroll ? 1 : pts.redReroll && !pts.ampReroll ? -1 : 0; // 2x keep higher / lower
+  if (amp || redPoints(attacker)) entry.notes.push(`pontos de dano: ${pointsText(amp, redPoints(attacker), dmg?.amount || 1, dmg?.dice || 8) || "—"}`);
   const parts = [];
   const want = (p) => parts.push(p) - 1;
-  const dmgParts = () => Array.from({ length: dmg.times }, () => [want({ amount: dmgAmount, sides: dmg.dice, bonus: dmg.bonus }), rerollBest ? want({ amount: dmgAmount, sides: dmg.dice, bonus: 0 }) : null]);
+  const dmgParts = () => Array.from({ length: dmg.times }, () => [want({ amount: dmgAmount, sides: dmg.dice, bonus: dmg.bonus }), reroll ? want({ amount: dmgAmount, sides: dmg.dice, bonus: 0 }) : null]);
   const plans = targetItems.map((t) => {
     const tSheet = getSheet(t);
     const target = tSheet?.pkmn;
@@ -105,7 +132,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     const contestMod = fx.contest && target ? mod(rules.attributes(target)[fx.contest.attr] ?? 10) : null;
     return {
       t, tSheet, target, saveMod, adv, saveAdv,
-      r: { targetId: t.id, target: t.name || (target ? rules.name(target) : "Alvo"), effects: [] },
+      // team/owner travel with the result so each viewer can hide what they shouldn't see
+      r: { targetId: t.id, target: t.name || (target ? rules.name(target) : "Alvo"), effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
       atk: move.attackBonus != null ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
       help: helped && move.attackBonus != null ? want({ amount: 1, sides: 6, bonus: 0 }) : null,
       sav: saveMod != null ? want({ amount: saveAdv ? 2 : 1, sides: 20, bonus: saveMod }) : null,
@@ -118,14 +146,17 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const rolled = parts.length ? await roller.batch(parts, `${moveName_}${opts.area ? " (área)" : ""}`) : [];
   const dice = (i) => rolled[i].dice;
   const pick = (i, adv) => (adv > 0 ? Math.max(...dice(i)) : adv < 0 ? Math.min(...dice(i)) : dice(i)[0]);
+  // one hit: the dice (or the better/worse of two rolls when there are rerolling points)
   const sumHit = ([main, second]) => {
     const a = dice(main).reduce((x, y) => x + y, 0);
-    const b = second != null ? dice(second).reduce((x, y) => x + y, 0) : -1;
-    return b > a ? { dice: dice(second), total: b } : { dice: dice(main), total: a };
+    if (second == null) return { dice: dice(main), total: a };
+    const b = dice(second).reduce((x, y) => x + y, 0);
+    const useB = reroll > 0 ? b > a : b < a;
+    return useB ? { dice: dice(second), total: b } : { dice: dice(main), total: a };
   };
   const sumDamage = (list) => {
     const hits = list.map(sumHit);
-    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus, 0) };
+    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + flatPts, 0) };
   };
 
   // 3) attacks, saves and contests
@@ -201,7 +232,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         final = Math.max(0, final - defStage * rules.proficiency(p.target));
       }
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
-      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + atkStage * aProf, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
+      // Redução: each 2 points halve the final damage (rounded down each time)
+      for (let i = 0; i < pts.redHalvings; i++) final = Math.floor(final / 2);
+      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + flatPts + atkStage * aProf, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
       if (p.target && settings.autoDamage && final > 0) {
         const ch = change(p.t.id);
         ch.damage += final;
@@ -240,6 +273,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (settings.autoPP && typeof move.pp === "number") s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - 1);
     spend(s, cost);
     for (const st of selfStages) addStage(s.pkmn, st.stat, st.delta);
+    if (pendingHelp) delete s.battle.helped; // Helping Hand is for ONE move
   });
   if (settings.autoPP && typeof move.pp === "number") entry.pp = `${move.pp - 1}/${move.ppMax}`;
   if (selfStages.length) entry.notes.push(`${who}: ${stageText(selfStages)}`);
@@ -277,19 +311,24 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   return entry;
 }
 
-// one-line text of a result, for notifications and the log
-export function describe(entry) {
+// can this viewer see the AC/HP numbers of a result's target? (players don't see the enemies')
+export const seesTarget = (r, viewer) => !viewer || canSeeFull({ team: r.team ?? "jogadores", owner: r.owner }, viewer);
+
+// one-line text of a result, for notifications and the log; viewer = { id, role } hides enemy numbers
+export function describe(entry, viewer) {
   if (entry.kind === "check") return `${entry.attacker}: ${entry.label} ${entry.total} (d20 ${entry.nat}${signed(entry.bonus)})`;
   if (entry.kind === "note") return `${entry.attacker}: ${entry.text}`;
   const parts = entry.results.map((r) => {
     if (!r.target) return r.note;
+    const full = seesTarget(r, viewer);
+    const vsAC = (ac) => (ac != null && full ? ` vs CA ${ac}` : "");
     let s = r.target + ": ";
-    if (r.attack) s += r.attack.crit ? "CRÍTICO! " : r.attack.hit ? `acertou (${r.attack.total}${r.attack.ac != null ? ` vs CA ${r.attack.ac}` : ""}) ` : r.attack.fumble ? "errou (1 natural) " : `errou (${r.attack.total} vs CA ${r.attack.ac}) `;
+    if (r.attack) s += r.attack.crit ? "CRÍTICO! " : r.attack.hit ? `acertou (${r.attack.total}${vsAC(r.attack.ac)}) ` : r.attack.fumble ? "errou (1 natural) " : `errou (${r.attack.total}${vsAC(r.attack.ac)}) `;
     if (r.save) s += (r.save.effectOnly ? "efeito: " : "") + (r.save.unknown ? `TR ${r.save.attr} CD ${r.save.dc} ` : `TR ${r.save.attr} ${r.save.total} vs CD ${r.save.dc} ${r.save.success ? "(passou) " : "(falhou) "}`);
     if (r.contest) s += `${r.contest.auto ? "acerto automático" : `${r.contest.total} vs ${r.contest.vs}`} ${r.contest.success ? "(pegou) " : "(resistiu) "}`;
     if (r.damage) s += `${r.damage.final} de dano${r.damage.effLabel ? ` (${r.damage.effLabel})` : ""}${r.damage.half ? " (metade)" : ""}`;
     if (r.effects?.length) s += ` — ${r.effects.join(", ")}`;
-    if (r.hpAfter) s += ` → HP ${r.hpAfter}`;
+    if (r.hpAfter && full) s += ` → HP ${r.hpAfter}`;
     return s.trim();
   });
   const extra = [entry.cost ? `(${entry.cost})` : "", ...(entry.notes ?? [])].filter(Boolean).join(" · ");

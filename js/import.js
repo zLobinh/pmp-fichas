@@ -1,4 +1,4 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.6.0";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.7.0";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);
@@ -29,9 +29,12 @@ $("ok").onclick = async () => {
     const pkmn = parseExport($("code").value, rules);
     const name = rules.name(pkmn);
     if (!itemId) throw new Error("Token não encontrado. Feche e abra de novo pelo menu do token.");
+    // a player's Pokémon join the players' team; the GM picks (enemies by default)
+    const gm = (await OBR.player.getRole()) === "GM";
+    const team = gm ? $("team").value : "jogadores";
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
-        d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, imported: Date.now() };
+        d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
         if ($("rename").checked) d.name = name;
       }
     });
@@ -45,4 +48,7 @@ $("ok").onclick = async () => {
   }
 };
 
-ready.then(() => syncTheme()).catch(() => {});
+ready.then(async () => {
+  syncTheme();
+  if ((await OBR.player.getRole()) === "GM") $("teamRow").style.display = "";
+}).catch(() => {});

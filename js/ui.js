@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.6.0";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.7.0";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -75,16 +75,51 @@ export async function openSheet(itemId, anchorElementId) {
   });
 }
 
-// quick sheet in the bottom-left corner
-export async function openHud(itemId) {
-  const height = await OBR.viewport.getHeight();
+export const STAGES_ID = `${ID}/stages`;
+
+// "Mudanças de Status" popup, in the middle-right of the screen
+export async function openStages(itemId) {
+  const [width, height] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+  return OBR.popover.open({
+    id: STAGES_ID,
+    url: asset(`stages.html?id=${encodeURIComponent(itemId)}`),
+    width: 420,
+    height: 560,
+    anchorReference: "POSITION",
+    anchorPosition: { left: width - 430, top: Math.max(70, height / 2 - 280) },
+    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+    transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+    disableClickAway: true,
+  });
+}
+
+// quick sheet: where the player last dragged it (bottom-left corner of the popover), per browser
+const HUD_POS_KEY = `${ID}/hudPos`;
+export function hudPosition(height) {
+  try {
+    const p = JSON.parse(localStorage.getItem(HUD_POS_KEY) || "null");
+    if (p && Number.isFinite(p.left) && Number.isFinite(p.bottom)) return p;
+  } catch {}
+  return { left: 16, bottom: height - 76 };
+}
+export function saveHudPosition(p) {
+  try { localStorage.setItem(HUD_POS_KEY, JSON.stringify(p)); } catch {}
+}
+
+// quick sheet in the bottom-left corner (or where it was dragged to)
+export async function openHud(itemId, extra = "") {
+  const [width, height] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+  const pos = hudPosition(height);
+  // keep it on screen if the window got smaller
+  const left = Math.max(0, Math.min(width - 120, pos.left));
+  const bottom = Math.max(120, Math.min(height, pos.bottom));
   return OBR.popover.open({
     id: HUD_ID,
-    url: asset(`hud.html?id=${encodeURIComponent(itemId)}`),
+    url: asset(`hud.html?id=${encodeURIComponent(itemId)}${extra}`),
     width: 330,
     height: 300,
     anchorReference: "POSITION",
-    anchorPosition: { left: 16, top: height - 76 },
+    anchorPosition: { left, top: bottom },
     anchorOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
     transformOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
     disableClickAway: true, // targets are clicked on the map while it stays open

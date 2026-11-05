@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.6.0";
-import { describe } from "./combat.js?v=0.6.0";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.6.0";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.6.0";
-import { dicePlusReady } from "./dice.js?v=0.6.0";
-import { endCombat } from "./battle.js?v=0.6.0";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.7.0";
+import { describe } from "./combat.js?v=0.7.0";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.7.0";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.7.0";
+import { dicePlusReady } from "./dice.js?v=0.7.0";
+import { endCombat, canSeeFull, teamOf, TEAMS } from "./battle.js?v=0.7.0";
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -13,20 +13,26 @@ const time = (t) => new Date(t).toLocaleTimeString("pt-BR", { hour: "2-digit", m
 
 function render() {
   const { rules } = state;
+  const viewer = { id: OBR.player.id, role: state.role };
+  // players only list their team; the GM sees everyone
   const withSheet = state.items.filter((i) => getSheet(i));
+  const listed = withSheet.filter((i) => canSeeFull(getSheet(i), viewer));
   root.replaceChildren(...[
     h("div", { class: "card" },
-      h("h2", {}, `Pokémon na cena (${withSheet.length})`),
-      withSheet.length
-        ? withSheet.map((i) => {
-            const p = getSheet(i).pkmn;
+      h("h2", {}, state.role === "GM" ? `Pokémon na cena (${withSheet.length})` : `Sua equipe (${listed.length})`),
+      listed.length
+        ? listed.map((i) => {
+            const s = getSheet(i);
+            const p = s.pkmn;
             const max = rules.maxHP(p);
             const init = initiativeOf(i);
+            const mine = state.role === "GM" || s.owner === OBR.player.id;
             return h("div", { class: "row", style: "margin:3px 0" },
               h("span", { class: init?.active ? "ok" : "" }, `${init?.active ? "▶ " : ""}${i.name || rules.name(p)}`),
+              state.role === "GM" ? h("span", { class: `chip small team-${teamOf(s)}` }, TEAMS[teamOf(s)]) : null,
               h("span", { class: "muted small" }, `Nv ${rules.level(p)} · HP ${p.hp.current}/${max}${init ? ` · Init ${init.count}` : ""}`),
               h("span", { class: "spacer" }),
-              h("button", { title: "Ficha rápida (HP e moves)", onclick: () => OBR.player.select([i.id], true).then(() => openHud(i.id)) }, "Rápida"),
+              mine ? h("button", { title: "Ficha rápida (HP e moves)", onclick: () => OBR.player.select([i.id], true).then(() => openHud(i.id)) }, "Rápida") : null,
               h("button", { onclick: () => OBR.player.select([i.id], true).then(() => openSheet(i.id)) }, "Ficha"));
           })
         : h("div", { class: "muted small" }, "Nenhum token com ficha. Clique num token e use \"Importar ficha do PMP\".")),
@@ -34,7 +40,7 @@ function render() {
       h("div", { class: "row" }, h("h2", { style: "margin:0" }, "Registro"), h("span", { class: "spacer" }),
         state.role === "GM" && state.log.length ? h("button", { class: "small", onclick: () => OBR.scene.setMetadata({ [LOG_KEY]: [] }) }, "Limpar") : null),
       state.log.length
-        ? h("ul", {}, state.log.map((e) => h("li", {}, h("span", { class: "muted small" }, `${time(e.at)} · ${e.by} `), describe(e))))
+        ? h("ul", {}, state.log.map((e) => h("li", {}, h("span", { class: "muted small" }, `${time(e.at)} · ${e.by} `), describe(e, viewer))))
         : h("div", { class: "muted small", style: "margin-top:6px" }, "Nada rolado ainda nesta cena.")),
     h("div", { class: "card" },
       h("h2", {}, "Minhas preferências"),

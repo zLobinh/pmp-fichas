@@ -1,12 +1,13 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.6.0";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.6.0";
-import { useMove, TurnError } from "./combat.js?v=0.6.0";
-import { TYPE_COLOR, openSheet, die, markHudAlive } from "./ui.js?v=0.6.0";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.6.0";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.6.0";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, moveTiming, has, chooseCost } from "./battle.js?v=0.6.0";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.7.0";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.7.0";
+import { useMove, TurnError } from "./combat.js?v=0.7.0";
+import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, die, markHudAlive } from "./ui.js?v=0.7.0";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.7.0";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.7.0";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints } from "./battle.js?v=0.7.0";
+import { seesTarget } from "./combat.js?v=0.7.0";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -85,10 +86,13 @@ function hpBlock(pkmn) {
       h("button", { class: "small", onclick: apply((p, n) => { const t = Math.min(p.hp.temp ?? 0, n); p.hp.temp = (p.hp.temp ?? 0) - t; p.hp.current = Math.max(0, p.hp.current - (n - t)); }) }, "Dano"),
       h("button", { class: "small", onclick: apply((p, n) => { p.hp.current = Math.min(rules.maxHP(p), p.hp.current + n); }) }, "Curar"),
       h("span", { class: "spacer" })),
-    Object.keys(cond).length || stages.length
+    Object.keys(cond).length || stages.length || sheet.battle?.helped || ampPoints(pkmn) || redPoints(pkmn)
       ? h("div", { class: "row", style: "margin-top:4px;gap:4px" },
+          sheet.battle?.helped ? h("span", { class: "chip up", title: "Vale só pro próximo ataque (ou até o fim da rodada)" }, `🤝 Helping Hand de ${sheet.battle.helped.by}`) : null,
           Object.entries(cond).map(([k, v]) => h("span", { class: "chip cond", title: condTip(k, v) }, `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`)),
-          stages.map(([k, v]) => h("span", { class: `chip ${v > 0 ? "up" : "down"}` }, `${STAGE_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`)))
+          stages.map(([k, v]) => h("span", { class: `chip ${v > 0 ? "up" : "down"}` }, `${STAGE_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`)),
+          ampPoints(pkmn) ? h("span", { class: "chip up" }, `Amp ${String(ampPoints(pkmn)).replace(".", ",")}`) : null,
+          redPoints(pkmn) ? h("span", { class: "chip down" }, `Red ${String(redPoints(pkmn)).replace(".", ",")}`) : null)
       : null);
 }
 
@@ -206,7 +210,7 @@ async function findHelpers(m) {
   const items = await OBR.scene.items.getItems((i) => i.metadata?.["com.pmp-fichas/sheet"]?.pkmn?.moves?.[HELPING_HAND] && i.id !== state.attackerId);
   for (const it of items) {
     const s = getSheet(it);
-    if (!(await canEdit(s))) continue;
+    if (!(await canEdit(s)) || !allies(s, getSheet(state.item))) continue; // your own Pokémon on the same team
     const pp = state.rules.movePP(s.pkmn, HELPING_HAND);
     let reason = "";
     if (s.pkmn.hp.current <= 0) reason = "desmaiado";
@@ -244,7 +248,7 @@ function targetBar() {
             const r = state.ranges.get(t.id);
             return h("span", { class: `chip on ${r && !r.ok ? "far" : ""}`, title: r?.reason ?? "" },
               t.name || "Token",
-              p ? ` · CA ${state.rules.ac(p)}` : "",
+              p && canSeeFull(getSheet(t), state.viewer) ? ` · CA ${state.rules.ac(p)}` : "",
               r?.meters != null ? ` · ${fmtM(r.meters)}` : "",
               r ? (r.ok ? " ✓" : " ✗") : "");
           })
@@ -293,14 +297,15 @@ function buildResult(e) {
       if (r.attack) bits.push(die(r.attack.nat, { animate, kind: r.attack.crit ? "crit" : r.attack.fumble ? "fumble" : "" }));
       else if (r.save && !r.save.unknown) bits.push(die(r.save.nat, { animate }));
       bits.push(h("b", {}, r.target), " ");
-      if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null ? ` vs ${r.attack.ac}` : ""}) `);
+      const full = seesTarget(r, state.viewer);
+      if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null && full ? ` vs ${r.attack.ac}` : ""}) `);
       if (r.save && !r.save.unknown) bits.push(h("span", { class: r.save.success ? "no" : "ok" }, `${r.save.effectOnly ? "efeito: " : ""}TR ${r.save.total} vs ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
       if (r.save?.unknown) bits.push(`TR ${r.save.attr} CD ${r.save.dc} `);
       if (r.contest) bits.push(h("span", { class: r.contest.success ? "ok" : "no" }, r.contest.auto ? "acerto automático " : `${r.contest.total} vs ${r.contest.vs} ${r.contest.success ? "pegou" : "resistiu"} `));
       if (r.damage) {
         bits.push(h("b", {}, `${r.damage.final} dano`), r.damage.effLabel ? ` ${r.damage.effLabel}` : "");
       }
-      if (r.hpAfter) bits.push(h("span", { class: "muted" }, ` → ${r.hpAfter}`));
+      if (r.hpAfter && full) bits.push(h("span", { class: "muted" }, ` → ${r.hpAfter}`));
       if (r.effects?.length) bits.push(h("span", { class: "warn" }, ` · ${r.effects.join(", ")}`));
       const dmgDice = r.damage?.dice.flat().length
         ? h("div", { class: "dice-row" }, r.damage.dice.flat().map((v) => die(v, { sides: r.damage.sides ?? 6, animate })),
@@ -382,10 +387,12 @@ function render() {
   const { rules } = state;
   root.replaceChildren(h("div", { class: "hud" },
     h("div", { class: "row hud-head" },
+      h("span", { class: "drag", title: "Arraste pra mudar a ficha rápida de lugar", onpointerdown: startDrag }, "⠿"),
       h("b", { class: "hud-name" }, state.item.name || rules.name(pkmn)),
       h("span", { class: "muted small" }, `Nv ${rules.level(pkmn)}`),
       rules.types(pkmn).map((t) => h("span", { class: "dot", style: `background:${TYPE_COLOR[t]}`, title: TYPE_PT[t] })),
       h("span", { class: "spacer" }),
+      h("button", { class: "icon", title: "Mudanças de Status (estágios e pontos de dano)", onclick: () => openStages(state.attackerId) }, "📊"),
       h("button", { class: "icon", title: "Ficha completa", onclick: () => openSheet(state.attackerId) }, "☰"),
       h("button", { class: "icon", title: "Fechar", onclick: close }, "✕")),
     hpBlock(pkmn),
@@ -395,6 +402,31 @@ function render() {
     h("div", { class: "hud-moves" }, rules.moveList(pkmn).map(moveRow)),
     resultBlock()));
   fit();
+}
+
+// Dragging: Owlbear can't move an open popover, so the quick sheet follows the pointer with a hint
+// and, on release, reopens at the new spot (remembered in this browser).
+function startDrag(ev) {
+  ev.preventDefault();
+  const handle = ev.currentTarget;
+  handle.setPointerCapture(ev.pointerId);
+  const start = { x: ev.screenX, y: ev.screenY };
+  document.body.classList.add("dragging");
+  const move = (e) => { document.body.dataset.drag = `${Math.round(e.screenX - start.x)}, ${Math.round(e.screenY - start.y)}`; };
+  const up = async (e) => {
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", up);
+    document.body.classList.remove("dragging");
+    const dx = e.screenX - start.x, dy = e.screenY - start.y;
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    const height = await OBR.viewport.getHeight();
+    const pos = hudPosition(height);
+    saveHudPosition({ left: Math.round(pos.left + dx), bottom: Math.round(pos.bottom + dy) });
+    markHudAlive();
+    await openHud(state.attackerId);
+  };
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", up);
 }
 
 // grow/shrink the popover to its content
@@ -409,6 +441,7 @@ OBR.onReady(async () => {
   syncTheme();
   state.rules = await loadRules();
   state.isGM = (await OBR.player.getRole()) === "GM";
+  state.viewer = { id: OBR.player.id, role: state.isGM ? "GM" : "PLAYER" };
   await setAttacker(state.attackerId);
   render();
   OBR.scene.items.onChange(async (items) => {

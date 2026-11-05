@@ -19,10 +19,10 @@ function makePkmn(species, level, moves, extra = {}) {
 // grid: 150 px per square, 1.5 m per square. Charmander is 2 squares from Bulbasaur, Squirtle 10.
 const token = (x) => ({ position: { x, y: 0 }, image: { width: 150, height: 150 }, grid: { dpi: 150 }, scale: { x: 1, y: 1 } });
 const items = [
-  { id: "a", name: "Bulbasaur", type: "IMAGE", layer: "CHARACTER", ...token(0), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Bulbasaur", 20, ["Tackle", "Razor Leaf", "Acid Spray", "Struggle"]), owner: "me" } } },
-  { id: "b", name: "Charmander", type: "IMAGE", layer: "CHARACTER", ...token(300), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Charmander", 10, ["Ember", "Scratch"], { nature: "Alegre" }), owner: "gm" } } },
+  { id: "a", name: "Bulbasaur", type: "IMAGE", layer: "CHARACTER", ...token(0), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Bulbasaur", 20, ["Tackle", "Razor Leaf", "Acid Spray", "Struggle"]), owner: "me", team: "jogadores" } } },
+  { id: "b", name: "Charmander", type: "IMAGE", layer: "CHARACTER", ...token(300), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Charmander", 10, ["Ember", "Scratch"], { nature: "Alegre" }), owner: "gm", team: "inimigos" } } },
   { id: "c", name: "Squirtle", type: "IMAGE", layer: "CHARACTER", ...token(1500), metadata: {} },
-  { id: "d", name: "Oddish", type: "IMAGE", layer: "CHARACTER", ...token(450), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Oddish", 8, ["Absorb"]), owner: "gm" } } },
+  { id: "d", name: "Oddish", type: "IMAGE", layer: "CHARACTER", ...token(450), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Oddish", 8, ["Absorb", "Helping Hand"]), owner: "me", team: "jogadores" } } },
 ];
 items[3].position = { x: 300, y: 300 }; // Oddish: 2 squares right, 2 down (diagonal)
 let selection = ["b"];
@@ -65,7 +65,8 @@ const OBR = {
   },
   player: {
     id: "me",
-    getRole: async () => "GM",
+    // ?as=player in the page URL: see the extension as a player instead of the GM
+    getRole: async () => (new URLSearchParams(location.search).get("as") === "player" ? "PLAYER" : "GM"),
     getName: async () => "Mestre",
     getSelection: async () => [...selection],
     select: async (ids) => { selection = ids; emit("player", { selection, metadata: clone(playerMeta) }); },
@@ -79,6 +80,7 @@ const OBR = {
     onMetadataChange: (f) => listeners.room.push(f),
   },
   theme: { getTheme: async () => ({ mode: "DARK" }), onChange: () => {} },
+  party: { getPlayers: async () => [{ id: "p1", name: "Ana", role: "PLAYER" }, { id: "p2", name: "Bruno", role: "PLAYER" }] },
   notification: { show: async (msg, v) => { console.log("[notificação]", v, msg); (window.__notes ??= []).push(msg); } },
   // messages are delivered inside this page (enough to fake the background answering the sheet)
   broadcast: {
@@ -97,6 +99,19 @@ const OBR = {
   modal: { open: async () => {}, close: async () => console.log("[modal.close]") },
   contextMenu: { create: () => {} },
 };
+
+// SDK builders: any setter stores the value, build() returns a plain item (enough for the marks)
+const builder = (type) => {
+  const item = { id: crypto.randomUUID(), type, metadata: {}, visible: true };
+  const p = new Proxy({}, { get: (_, k) => (k === "build" ? () => item : (v) => { item[k] = v; return p; }) });
+  return p;
+};
+export const buildShape = () => builder("SHAPE");
+export const buildLabel = () => builder("LABEL");
+export const buildLine = () => builder("LINE");
+export const buildCurve = () => builder("CURVE");
+OBR.scene.items.addItems = async (list) => { items.push(...clone(list)); emit("items", clone(items)); };
+OBR.scene.items.deleteItems = async (ids) => { for (const id of ids) { const i = items.findIndex((x) => x.id === id); if (i >= 0) items.splice(i, 1); } emit("items", clone(items)); };
 
 // test hooks
 window.__mock = {

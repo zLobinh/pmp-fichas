@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.6.0";
-import { d } from "./rules.js?v=0.6.0";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.7.0";
+import { d } from "./rules.js?v=0.7.0";
 
 // ------------------------------------------------------------------ conditions
 
@@ -402,11 +402,15 @@ export async function startTurn(rules, item) {
   return notes;
 }
 
-// a new round: action and bonus action come back for everyone in the initiative
+// a new round: action and bonus action come back for everyone in the initiative;
+// a Helping Hand nobody used expires
 export async function newRound(items) {
   for (const it of items) {
-    if (!inInitiative(it)) continue;
-    await updateSheet(it.id, (sheet) => { sheet.battle.econ = { ...econOf(sheet), action: true, bonus: true }; });
+    if (!inInitiative(it) && !getSheet(it)?.battle?.helped) continue;
+    await updateSheet(it.id, (sheet) => {
+      sheet.battle.econ = { ...econOf(sheet), action: true, bonus: true };
+      delete sheet.battle.helped;
+    });
   }
 }
 
@@ -420,6 +424,8 @@ export async function endCombat(items) {
       if (cond.Drowsy) delete cond.Drowsy;
       sheet.battle = { cond };
       sheet.pkmn.stages = {};
+      delete sheet.pkmn.damage_amp; // like the app's reset_battle_stages
+      delete sheet.pkmn.damage_red;
       syncAppStatuses(sheet);
     });
   }
@@ -463,9 +469,85 @@ export function watchTurns(rules) {
   tick();
 }
 
-// ------------------------------------------------------------------ token marks: gray when fainted, condition label
+// ------------------------------------------------------------------ teams and who sees what
+
+export const TEAMS = { jogadores: "Jogadores", inimigos: "Inimigos", neutros: "Neutros" };
+export const teamOf = (sheet) => sheet?.team ?? "inimigos";
+export const allies = (a, b) => teamOf(a) === teamOf(b);
+
+// full sheet (HP numbers, AC, moves) for: the GM, the owner, and the players' own team
+export const canSeeFull = (sheet, viewer) => viewer.role === "GM" || sheet?.owner === viewer.id || teamOf(sheet) === "jogadores";
+
+// ------------------------------------------------------------------ damage points (pág. 57-58), like the app
+
+export const ampPoints = (pkmn) => pkmn?.damage_amp ?? 0;
+export const redPoints = (pkmn) => pkmn?.damage_red ?? 0;
+export function setPoints(pkmn, key, value) {
+  const v = Math.max(0, Math.min(20, Math.round(value * 2) / 2));
+  if (v) pkmn[key] = v; else delete pkmn[key];
+}
+export function pointsSummary(amp, red) {
+  const a = Math.floor(amp), r = Math.floor(red);
+  return {
+    ampGroups: Math.floor(a / 2), ampReroll: a % 2 === 1, ampFlat: amp === 0.5,
+    redHalvings: Math.floor(r / 2), redReroll: r % 2 === 1, redFlat: red === 0.5,
+  };
+}
+// each group of 2 points: +1 die for every 2; an odd die left over gives +1/4 of its max (rounded up)
+export function amplifyDice(amount, sides, groups) {
+  let bonus = 0;
+  for (let i = 0; i < groups; i++) {
+    if (amount % 2 === 1) bonus += Math.ceil(sides / 4);
+    amount += Math.floor(amount / 2);
+  }
+  return { amount, bonus };
+}
+export function pointsText(amp, red, amount = 4, sides = 8) {
+  const s = pointsSummary(amp, red);
+  const out = [];
+  if (s.ampFlat) out.push("+½ prof. de dano");
+  if (s.ampGroups) { const a = amplifyDice(amount, sides, s.ampGroups); out.push(`${amount}d${sides} → ${a.amount}d${sides}${a.bonus ? `+${a.bonus}` : ""}`); }
+  if (s.ampReroll) out.push("rola o dano 2x e fica com o maior");
+  if (s.redFlat) out.push("−½ prof. de dano");
+  if (s.redReroll) out.push("rola o dano 2x e fica com o menor");
+  if (s.redHalvings) out.push(`dano final ÷${2 ** s.redHalvings}`);
+  return out.join(" · ");
+}
+
+// ------------------------------------------------------------------ token marks (GM only)
+// HP bar + conditions/stages label under every Pokémon with a sheet, gray overlay when fainted,
+// and fainted Pokémon leave the initiative.
 
 const MARK = `${ID}/mark`;
+
+const hpColor = (pct) => (pct > 0.5 ? "#46c37b" : pct > 0.25 ? "#f0b03f" : "#ef5d5d");
+
+export function marksText(sheet) {
+  const cond = conditionsOf(sheet);
+  const parts = Object.keys(cond).map((k) => `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`);
+  for (const [k, v] of Object.entries(sheet.pkmn.stages ?? {})) if (v) parts.push(`${v > 0 ? "▲" : "▼"} ${STAGE_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`);
+  if (sheet.battle?.helped) parts.push("🤝 Helping Hand");
+  return parts.join("  ");
+}
+
+// takes a fainted Pokémon out of Pretty Sordid (passing the turn on if it was its turn)
+async function leaveInitiative(token) {
+  const meta = await OBR.scene.getMetadata();
+  const order = Object.values(meta["com.pretty-initiative/order"] ?? {});
+  const wasActive = isActive(token);
+  await OBR.scene.items.updateItems([token.id], (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
+  const rest = order.filter((id) => id !== token.id);
+  const patch = { "com.pretty-initiative/order": Object.fromEntries(rest.map((id, i) => [i, id])) };
+  if (wasActive && rest.length) {
+    const idx = Math.max(0, order.indexOf(token.id));
+    const nextId = order.slice(idx + 1).find((id) => rest.includes(id));
+    const next = nextId ?? rest[0];
+    if (!nextId) patch["com.pretty-initiative/roundCount"] = Number(meta["com.pretty-initiative/roundCount"] ?? 1) + 1;
+    await OBR.scene.items.updateItems([next], (ds) => { for (const d0 of ds) if (d0.metadata[PRETTY]) d0.metadata[PRETTY].active = true; });
+  }
+  await OBR.scene.setMetadata(patch);
+  await pushLog({ kind: "note", attacker: "Combate", text: `${token.name} desmaiou e saiu da iniciativa` });
+}
 
 export function watchMarks(rules) {
   let busy = false, again = false;
@@ -480,29 +562,42 @@ export function watchMarks(rules) {
       const want = [];
       for (const t of tokens) {
         const sheet = getSheet(t);
-        const fainted = (sheet.pkmn.hp?.current ?? 1) <= 0;
-        const cond = conditionsOf(sheet);
+        const max = Math.max(1, rules.maxHP(sheet.pkmn));
+        const hp = sheet.pkmn.hp?.current ?? 0;
+        const pct = Math.max(0, Math.min(1, hp / max));
+        const fainted = hp <= 0;
+        if (fainted && inInitiative(t)) await leaveInitiative(t);
         const size = t.image && t.grid?.dpi ? (t.image.width / t.grid.dpi) * Math.abs(t.scale?.x ?? 1) * dpi : dpi;
-        if (fainted) want.push({ kind: "faint", for: t.id, size, pos: t.position, key: `faint:${t.id}:${Math.round(size)}` });
-        const text = fainted ? "😵 Desmaiado" : Object.keys(cond).map((k) => `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`).join("  ");
-        if (text) want.push({ kind: "label", for: t.id, size, pos: t.position, text, key: `label:${t.id}:${text}` });
+        const base = { for: t.id, size, pos: t.position, visible: t.visible };
+        const w = size * 0.8, hgt = Math.max(6, dpi * 0.07), top = t.position.y + size / 2 + dpi * 0.04;
+        const left = t.position.x - w / 2;
+        // the bar's fill is stepped to 5% so tiny HP changes don't rebuild it
+        const step = Math.round(pct * 20) / 20;
+        want.push({ ...base, kind: "barbg", x: left, y: top, w, h: hgt, key: `barbg:${t.id}:${Math.round(w)}:${t.visible}` });
+        if (step > 0) want.push({ ...base, kind: "bar", x: left, y: top, w: w * step, h: hgt, color: hpColor(pct), key: `bar:${t.id}:${step}:${Math.round(w)}:${t.visible}` });
+        if (fainted) want.push({ ...base, kind: "faint", key: `faint:${t.id}:${Math.round(size)}:${t.visible}` });
+        const text = fainted ? "😵 Desmaiado" : marksText(sheet);
+        if (text) want.push({ ...base, kind: "label", y: top + hgt + dpi * 0.04, text, key: `label:${t.id}:${text}:${t.visible}` });
       }
       const haveKeys = new Set(marks.map((m) => m.metadata[MARK].key));
-      const wantKeys = new Set(want.map((w) => w.key));
+      const wantKeys = new Set(want.map((x) => x.key));
       const remove = marks.filter((m) => !wantKeys.has(m.metadata[MARK].key)).map((m) => m.id);
       if (remove.length) await OBR.scene.items.deleteItems(remove);
       const { buildShape, buildLabel } = SDK;
       const add = [];
-      for (const w of want) {
-        if (haveKeys.has(w.key)) continue;
-        if (w.kind === "faint") {
-          add.push(buildShape().shapeType("CIRCLE").width(w.size * 0.95).height(w.size * 0.95).position(w.pos)
-            .fillColor("#30303a").fillOpacity(0.62).strokeColor("#30303a").strokeOpacity(0.8).strokeWidth(dpi * 0.03)
-            .layer("ATTACHMENT").attachedTo(w.for).locked(true).disableHit(true).metadata({ [MARK]: { key: w.key } }).build());
+      const common = (b, x) => b.layer("ATTACHMENT").attachedTo(x.for).locked(true).disableHit(true).visible(x.visible).metadata({ [MARK]: { key: x.key } });
+      for (const x of want) {
+        if (haveKeys.has(x.key)) continue;
+        if (x.kind === "faint") {
+          add.push(common(buildShape().shapeType("CIRCLE").width(x.size * 0.95).height(x.size * 0.95).position(x.pos)
+            .fillColor("#30303a").fillOpacity(0.62).strokeColor("#30303a").strokeOpacity(0.8).strokeWidth(dpi * 0.03), x).build());
+        } else if (x.kind === "barbg" || x.kind === "bar") {
+          add.push(common(buildShape().shapeType("RECTANGLE").width(x.w).height(x.h).position({ x: x.x, y: x.y })
+            .fillColor(x.kind === "bar" ? x.color : "#1b1d27").fillOpacity(x.kind === "bar" ? 0.95 : 0.85)
+            .strokeColor("#000000").strokeOpacity(x.kind === "bar" ? 0 : 0.6).strokeWidth(x.kind === "bar" ? 0 : 2), x).zIndex(x.kind === "bar" ? 2 : 1).build());
         } else {
-          add.push(buildLabel().plainText(w.text).position({ x: w.pos.x, y: w.pos.y + w.size / 2 + dpi * 0.1 })
-            .backgroundColor("#1e2231").backgroundOpacity(0.85).fillColor("#ffffff").pointerDirection("UP")
-            .layer("ATTACHMENT").attachedTo(w.for).locked(true).disableHit(true).metadata({ [MARK]: { key: w.key } }).build());
+          add.push(common(buildLabel().plainText(x.text).position({ x: x.pos.x, y: x.y })
+            .backgroundColor("#1e2231").backgroundOpacity(0.85).fillColor("#ffffff").pointerDirection("UP"), x).build());
         }
       }
       if (add.length) await OBR.scene.items.addItems(add);
