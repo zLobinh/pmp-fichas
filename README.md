@@ -40,9 +40,45 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   cinza tracejado = errou). Todo mundo na sala vê.
 - **Ações (Livro de Regras, pág. 47-49):** com o Pretty Sordid rodando, cada Pokémon tem Ação, Ação Bônus e Reação
   (aparecem na ficha rápida). Ação e Bônus voltam a cada rodada; a Reação volta no início do turno do próprio Pokémon.
-  Fora do turno só dá pra usar Moves de reação (ex.: Quick Attack, Protect, Counter); Moves "ação / reação" usados
-  como reação tiram a ação do próximo turno quando o Move diz isso. O mestre pode forçar ("Usar mesmo assim").
-  Sem ninguém ativo no Pretty Sordid, nada é cobrado (jogo livre).
+  Fora do turno só dá pra usar Moves de reação (ex.: Quick Attack, Protect, Counter). Usar como reação um Move
+  "ação / reação" (ou o Helping Hand) adianta o turno: gasta a reação **e a ação do próximo turno** (aparece
+  *−Ação próx.*). Os efeitos garantidos (ex.: atordoar do Fake Out) já valem na hora. O mestre pode forçar
+  ("Usar mesmo assim"). Sem ninguém ativo no Pretty Sordid, nada é cobrado (jogo livre).
+- **Fake Out:** só na 1ª rodada do Pretty Sordid (como ação ou reação).
+- **⏭ Passar turno:** botão na ficha rápida quando é a vez do Pokémon (passa pro próximo; depois do último, nova rodada).
+- **Ação preparada:** se um jogador escolhe fora do turno um Move que não é reação, ele fica travado nesse Move
+  (⏳ na ficha rápida, com *Cancelar*). No início do turno do Pokémon, a extensão usa sozinha: se o alvo está no
+  alcance, ataca; senão, anda pelo caminho mais curto até o alcance (gastando deslocamento) e ataca. Sem
+  deslocamento suficiente, cancela e avisa pro jogador escolher. Moves de área não podem ser preparados.
+- **Deslocamento (pág. 50-52):** em combate, a ficha rápida mostra 👣 *usado / total*. Arrastar o token gasta os
+  metros (régua do Owlbear); se passar do total ou não for o turno dele, o token volta pro lugar. Paralisado e
+  Sonolento: metade; Dormindo, Congelado e Atordoado: 0; levantar de Caído custa metade. Estágio de Velocidade
+  soma 1,5 m por estágio, Mobilidade +3 m. O mestre pode desligar o controle no painel.
+- **💨 Disparada:** gasta a ação e dobra o deslocamento do turno.
+- **Voo:** Pokémon com deslocamento de voo têm ▲/▼ (1,5 m por clique, gasta deslocamento). A altura aparece no token
+  (✈ 4,5 m). A partir de 3 m ele está **Elevado**: imune a Moves de Terra (menos Thousand Arrows), e os ataques à
+  distância dele contra alvos além da metade do alcance têm desvantagem (TR com vantagem). A distância conta a
+  altura: maior valor (altura ou chão) + metade do menor. Se não puder mais voar (dormiu, congelou, atordoou,
+  desmaiou, Smack Down), cai: 1d6 a partir de 3 m (ou do salto em altura), +1d6 a cada 3 m, e fica Caído.
+- **Pulo (🦘):** num Move corpo a corpo contra um voador, um Pokémon no chão pula sozinho se der: alcança 1,5 m
+  acima de si + o salto em altura (1 m + 0,5 m por ponto de FOR; metade se não andou 3 m antes). O pulo gasta
+  deslocamento.
+- **🤾 Arremessar (ação):** joga um objeto num alvo até 2 m + 1 m por ponto de FOR (alcança voadores).
+  d20 + FOR contra a CA, 1d6 + FOR de dano sem tipo; Fantasmas são imunes.
+- **Fly, Bounce, Dig, Dive, Phantom Force, Shadow Force:** no 1º uso o Pokémon gasta a ação, o PP e 3 m de
+  deslocamento e fica **🌀 Invulnerável**: ninguém consegue mirar nele (ataques, Helping Hand, áreas), exceto os
+  Moves certos: Smack Down (cancela o Fly/Bounce e derruba), Gust e Twister (dados dobrados), Thunder, Hurricane
+  e Sky Uppercut contra Fly/Bounce; Earthquake e Magnitude (dados dobrados) e Fissure contra Dig; Surf e
+  Whirlpool contra Dive. Enquanto isso ele só pode usar o próprio Move. No próximo turno, como ação, ataca com
+  vantagem (com o −1/−2 do texto) qualquer alvo a até 12 m de onde sumiu e reaparece do lado dele. Se não
+  atacar até o fim desse turno, reaparece sem atacar.
+- **Focus Punch:** no 1º uso gasta a ação focando. No início do próximo turno o golpe sai como ação livre.
+- **Moves de carga** (Solar Beam, Skull Bash, Razor Wind, Sky Attack, Meteor Beam...): carregam agora (com os
+  estágios do texto, ex.: Skull Bash +1 Def) e são liberados com uma ação no próximo turno, sem gastar PP de novo.
+  Tomar dano enquanto carrega/foca pede um TR de CON (CD 10 ou metade do dano); falhou, perdeu. Usar outro Move
+  também perde a carga.
+- **Moves de recarga** (Hyper Beam, Giga Impact, Blast Burn...): no próximo turno o Pokémon fica sem ação padrão
+  e sem reação.
 - **Condições de status (pág. 72):** Queimado, Congelado, Paralisado, Envenenado, Gravemente Envenenado, Sonolento,
   Dormindo, Atordoado, Confuso e Encantado, com imunidade por tipo, um status não-volátil por vez e Período de
   Carência. No fim do turno (no navegador do mestre): dano de Queimado/Envenenado/Gravemente Envenenado (prof. ×
@@ -58,7 +94,7 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   secundários ("resultado natural de 19 ou 20... fica queimado") e efeitos de TR falho (Nuzzle, Acid Spray).
   Cerca de 350 dos 838 Moves têm efeito automático; o resto mostra a descrição e o mestre aplica na ficha completa.
 - **Helping Hand:** ao escolher os alvos de um ataque, aparecem seus Pokémon com Helping Hand, reação livre e a até
-  18 m. Marcando, eles gastam a reação e 1 PP: +1d6 no acerto e metade a mais de dados de dano (1 dado: rola 2x).
+  18 m. Marcando, eles gastam a reação, a ação do próximo turno deles e 1 PP: +1d6 no acerto e metade a mais de dados de dano (1 dado: rola 2x).
 - **Equipes e donos:** cada ficha tem uma equipe (Jogadores, Inimigos ou Neutros) e um dono. Jogador que importa
   vira dono e entra em Jogadores; o mestre escolhe a equipe na importação e pode trocar equipe e dono na ficha
   completa. Cada jogador só usa os próprios Pokémon (ficha rápida e Moves).
@@ -127,3 +163,9 @@ As contas seguem `pokedex/pokemon.lua`, mas estas partes do app ainda não foram
 - efeitos de item segurado e de habilidade (aparecem na ficha, mas não mexem nos números);
 - Pontos de Amplificação/Redução, estágios de batalha, Mega Evolução;
 - Moves de vários golpes rolam só o ataque principal (a tabela aparece na descrição).
+- deslocamento de nado/escalada/escavação (aparecem na ficha rápida, mas o controle usa andar e voo), terreno
+  difícil, ataques de oportunidade e "Ataques à distância engajados";
+- Sky Drop, Bide, Shell Trap e Beak Blast não têm fase automática (use pela descrição).
+
+Alguns Moves do app (Acid Spray, Horn Attack, Low Sweep, Octolock e mais 8) descrevem um teste de resistência mas
+estão sem o campo "Save" no JSON; a extensão lê o atributo do texto ("teste de CON contra sua CD de Move").

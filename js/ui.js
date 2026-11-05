@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.7.0";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.8.2";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -93,35 +93,59 @@ export async function openStages(itemId) {
   });
 }
 
-// quick sheet: where the player last dragged it (bottom-left corner of the popover), per browser
+// Quick sheet placement, per browser. Owlbear trims a popover that doesn't fit between its anchor
+// and the edge it grows towards, so: in the top half of the screen it hangs from its top edge and
+// grows down; in the bottom half it stands on its bottom edge and grows up. Its last height is
+// remembered so it opens at the right size, and `room` tells the page how tall it may get.
 const HUD_POS_KEY = `${ID}/hudPos`;
-export function hudPosition(height) {
-  try {
-    const p = JSON.parse(localStorage.getItem(HUD_POS_KEY) || "null");
-    if (p && Number.isFinite(p.left) && Number.isFinite(p.bottom)) return p;
-  } catch {}
-  return { left: 16, bottom: height - 76 };
+const HUD_H_KEY = `${ID}/hudHeight`;
+const HUD_ROOM_KEY = `${ID}/hudRoom`;
+const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
+const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+export const hudHeight = () => read(HUD_H_KEY) ?? 300;
+export const saveHudHeight = (h) => write(HUD_H_KEY, Math.round(h));
+export const hudRoom = () => read(HUD_ROOM_KEY) ?? 640; // max height that fits where it is
+const HUD_ANCHOR_KEY = `${ID}/hudAnchor`;
+// the popover's current top edge (in bottom mode it moves as the height changes)
+export function hudTop(currentHeight, viewportHeight) {
+  const a = read(HUD_ANCHOR_KEY);
+  if (!a) return hudPosition(viewportHeight).top;
+  return a.fromTop ? a.y : a.y - currentHeight;
 }
-export function saveHudPosition(p) {
-  try { localStorage.setItem(HUD_POS_KEY, JSON.stringify(p)); } catch {}
+
+// { left, top } of the popover's top-left corner
+export function hudPosition(viewportHeight) {
+  const p = read(HUD_POS_KEY);
+  if (p && Number.isFinite(p.left) && Number.isFinite(p.top)) return p;
+  if (p && Number.isFinite(p.left) && Number.isFinite(p.bottom)) return { left: p.left, top: p.bottom - hudHeight() }; // old format
+  return { left: 16, top: viewportHeight - 76 - hudHeight() };
 }
+export const saveHudPosition = (p) => write(HUD_POS_KEY, { left: Math.round(p.left), top: Math.round(p.top) });
 
 // quick sheet in the bottom-left corner (or where it was dragged to)
 export async function openHud(itemId, extra = "") {
-  const [width, height] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
-  const pos = hudPosition(height);
+  const [width, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
+  const pos = hudPosition(vh);
+  const h = hudHeight();
   // keep it on screen if the window got smaller
   const left = Math.max(0, Math.min(width - 120, pos.left));
-  const bottom = Math.max(120, Math.min(height, pos.bottom));
+  const top = Math.max(8, Math.min(vh - 120, pos.top));
+  const fromTop = top + h / 2 < vh / 2;
+  const anchor = fromTop ? { left, top } : { left, top: Math.min(vh - 8, top + h) };
+  const room = fromTop ? vh - top - 8 : anchor.top - 8;
+  write(HUD_ROOM_KEY, room);
+  write(HUD_ANCHOR_KEY, { fromTop, y: anchor.top });
+  const v = fromTop ? "TOP" : "BOTTOM";
   return OBR.popover.open({
     id: HUD_ID,
     url: asset(`hud.html?id=${encodeURIComponent(itemId)}${extra}`),
     width: 330,
-    height: 300,
+    height: Math.min(h, room),
     anchorReference: "POSITION",
-    anchorPosition: { left, top: bottom },
-    anchorOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
-    transformOrigin: { horizontal: "LEFT", vertical: "BOTTOM" },
+    anchorPosition: anchor,
+    anchorOrigin: { horizontal: "LEFT", vertical: v },
+    transformOrigin: { horizontal: "LEFT", vertical: v },
     disableClickAway: true, // targets are clicked on the map while it stays open
   });
 }

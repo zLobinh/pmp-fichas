@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.7.0";
-import { describe } from "./combat.js?v=0.7.0";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.7.0";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.7.0";
-import { dicePlusReady } from "./dice.js?v=0.7.0";
-import { endCombat, canSeeFull, teamOf, TEAMS } from "./battle.js?v=0.7.0";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.8.2";
+import { describe } from "./combat.js?v=0.8.2";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.8.2";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.8.2";
+import { dicePlusReady } from "./dice.js?v=0.8.2";
+import { endCombat, canSeeFull, teamOf, TEAMS } from "./battle.js?v=0.8.2";
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -51,6 +51,7 @@ function render() {
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoDamage, onchange: (e) => setSettings({ autoDamage: e.target.checked }) }), "Descontar o dano do HP do alvo automaticamente"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoPP, onchange: (e) => setSettings({ autoPP: e.target.checked }) }), "Gastar 1 PP ao usar um Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.checkRange, onchange: (e) => setSettings({ checkRange: e.target.checked }) }), "Exigir que o alvo esteja no alcance do Move"),
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.moveControl, onchange: (e) => setSettings({ moveControl: e.target.checked }) }), "Controlar o deslocamento em combate (token volta se andar demais ou fora do turno)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.mapFx, onchange: (e) => setSettings({ mapFx: e.target.checked }) }), "Animação no mapa (quem acertou quem)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.dicePlus, onchange: (e) => setSettings({ dicePlus: e.target.checked }) }),
             "Rolar com o Dice+ (dados 3D na tela)",

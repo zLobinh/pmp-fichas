@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.7.0";
+import { Rules } from "./rules.js?v=0.8.2";
 
 export { OBR, SDK };
 export const ID = "com.pmp-fichas";
@@ -21,7 +21,7 @@ export const STATUSES = {
 };
 
 // set by tools/bump_version.py
-export const VERSION = "0.7.0";
+export const VERSION = "0.8.2";
 
 // absolute URL of a file of this extension (works on a GitHub Pages sub-path), tagged with the
 // version so browsers don't keep serving the previous one from their cache
@@ -69,7 +69,7 @@ export async function updateSheet(id, fn) {
       sheet.pkmn.hp ??= { current: 0, max: 0 };
       sheet.pkmn.moves ??= {};
       sheet.battle ??= {};
-      fn(sheet);
+      fn(sheet, d); // d: the item draft (to move the token in the same update)
       sheet.updated = Date.now();
     }
   });
@@ -117,7 +117,7 @@ export async function pushLog(entry) {
 
 export async function getSettings() {
   const meta = await OBR.room.getMetadata();
-  return { autoDamage: true, autoPP: true, checkRange: true, mapFx: true, dicePlus: true, dicePlusPopup: false, ...(meta[SETTINGS_KEY] ?? {}) };
+  return { autoDamage: true, autoPP: true, checkRange: true, mapFx: true, dicePlus: true, dicePlusPopup: false, moveControl: true, ...(meta[SETTINGS_KEY] ?? {}) };
 }
 
 export async function setSettings(patch) {

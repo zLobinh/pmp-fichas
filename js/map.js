@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.7.0";
-import { fmtM } from "./rules.js?v=0.7.0";
-import { getRoller } from "./dice.js?v=0.7.0";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.8.2";
+import { fmtM } from "./rules.js?v=0.8.2";
+import { getRoller } from "./dice.js?v=0.8.2";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -13,19 +13,39 @@ function sizeCells(item) {
   return Math.max(1, Math.round((item.image.width / item.grid.dpi) * Math.abs(item.scale?.x ?? 1)));
 }
 
-// edge-to-edge distance in meters, using the scene's grid measurement (same as the Owlbear ruler)
-export async function distanceMeters(a, b) {
-  const [cells, scale] = await Promise.all([
-    OBR.scene.grid.getDistance(a.position, b.position),
-    OBR.scene.grid.getScale(),
-  ]);
-  const shrink = (sizeCells(a) - 1) / 2 + (sizeCells(b) - 1) / 2;
+// meters per grid cell (the scene's scale, in meters)
+export async function cellMeters() {
+  const scale = await OBR.scene.grid.getScale();
   const unit = UNIT_TO_M[scale.parsed?.unit?.toLowerCase?.()] ?? 1;
-  return Math.max(0, cells - shrink) * (scale.parsed?.multiplier ?? 1.5) * unit;
+  return (scale.parsed?.multiplier ?? 1.5) * unit;
 }
 
-// [{ id, name, meters, ok, reason }] for every target
-export async function checkRange(attacker, move, targets) {
+// how high a Pokémon is flying (sheet.battle.alt, meters)
+export const altitudeOf = (item) => Math.max(0, Number(getSheet(item)?.battle?.alt) || 0);
+
+// ground distance in meters between two points (Owlbear ruler), no token size
+export async function pointMeters(p, q) {
+  const [cells, m] = await Promise.all([OBR.scene.grid.getDistance(p, q), cellMeters()]);
+  return cells * m;
+}
+
+// "Distância voando = maior distância (vertical ou horizontal) + metade da menor" (pág. 52)
+export const flightDistance = (h, v) => Math.max(h, v) + Math.min(h, v) / 2;
+
+// edge-to-edge distance in meters, using the scene's grid measurement (same as the Owlbear ruler),
+// with the difference in altitude when one of them is flying. opts.vertical overrides that difference.
+export async function distanceMeters(a, b, opts = {}) {
+  const [cells, m] = await Promise.all([OBR.scene.grid.getDistance(a.position, b.position), cellMeters()]);
+  const shrink = (sizeCells(a) - 1) / 2 + (sizeCells(b) - 1) / 2;
+  const h = Math.max(0, cells - shrink) * m;
+  const v = opts.vertical ?? Math.abs(altitudeOf(a) - altitudeOf(b));
+  return v > 0 ? flightDistance(h, v) : h;
+}
+
+// [{ id, name, meters, ok, reason, jump }] for every target
+// opts.jump = { height, left }: a Pokémon on the ground may jump to reach a flying one in melee
+// (pág. 52 "Salto em Altura"; the jump uses movement)
+export async function checkRange(attacker, move, targets, opts = {}) {
   const r = move.rangeInfo;
   const out = [];
   for (const t of targets) {
@@ -34,9 +54,22 @@ export async function checkRange(attacker, move, targets) {
       out.push({ id: t.id, name: t.name, ok: t.id === attacker.id, reason: "move pessoal (só no próprio Pokémon)" });
       continue;
     }
-    const meters = Math.round((await distanceMeters(attacker, t)) * 10) / 10;
-    const ok = meters <= r.meters + 0.05;
-    out.push({ id: t.id, name: t.name, meters, ok, reason: ok ? "" : `está a ${fmtM(meters)}, alcance ${r.label}` });
+    const v = Math.abs(altitudeOf(attacker) - altitudeOf(t));
+    // melee reaches 1,5 m up or down without jumping
+    const reachV = r.kind === "melee" ? Math.max(0, v - 1.5) : v;
+    const meters = Math.round((await distanceMeters(attacker, t, { vertical: reachV })) * 10) / 10;
+    let ok = meters <= r.meters + 0.05;
+    let reason = ok ? "" : `está a ${fmtM(meters)}${v ? ` (${fmtM(v)} de altura)` : ""}, alcance ${r.label}`;
+    let jump = null;
+    if (!ok && r.kind === "melee" && opts.jump && altitudeOf(t) > altitudeOf(attacker) && altitudeOf(attacker) === 0) {
+      const need = Math.round(reachV * 10) / 10;
+      const jumped = Math.round((await distanceMeters(attacker, t, { vertical: Math.max(0, reachV - opts.jump.height) })) * 10) / 10;
+      if (jumped <= r.meters + 0.05 && need <= opts.jump.height + 0.05) {
+        if (opts.jump.left != null && opts.jump.left + 0.05 < need) reason = `precisa pular ${fmtM(need)} e só tem ${fmtM(opts.jump.left)} de deslocamento`;
+        else { ok = true; jump = need; reason = ""; }
+      } else reason = `está a ${fmtM(v)} de altura: o pulo alcança só ${fmtM(Math.round((opts.jump.height + 1.5) * 10) / 10)}`;
+    }
+    out.push({ id: t.id, name: t.name, meters, ok, reason, jump });
   }
   return out;
 }

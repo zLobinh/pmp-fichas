@@ -17,7 +17,7 @@
     </p>
     <div id="out">Rodando…</div>
     <script type="module">
-      import { Rules } from "../js/rules.js";
+      const { Rules } = await import(`../js/rules.js?t=${Date.now()}`); // never the cached copy
       const load = (f) => fetch(`../data/${f}.json`).then((r) => r.json());
       const [moves, pokemon, rules] = await Promise.all(["moves", "pokemon", "rules"].map(load));
       const R = new Rules({ moves, pokemon, rules });

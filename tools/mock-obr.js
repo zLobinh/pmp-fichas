@@ -25,6 +25,10 @@ const items = [
   { id: "d", name: "Oddish", type: "IMAGE", layer: "CHARACTER", ...token(450), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Oddish", 8, ["Absorb", "Helping Hand"]), owner: "me", team: "jogadores" } } },
 ];
 items[3].position = { x: 300, y: 300 }; // Oddish: 2 squares right, 2 down (diagonal)
+// Pidgey (flies 7,5 m): 4 squares right of Bulbasaur
+items.push({ id: "e", name: "Pidgey", type: "IMAGE", layer: "CHARACTER", ...token(600), metadata: { "com.pmp-fichas/sheet": { pkmn: makePkmn("Pidgey", 10, ["Fly", "Gust", "Quick Attack", "Focus Punch"]), owner: "gm", team: "inimigos" } } });
+items[0].metadata["com.pmp-fichas/sheet"].pkmn.moves["Fake Out"] = { index: 5 };
+items[0].metadata["com.pmp-fichas/sheet"].pkmn.moves["Smack Down"] = { index: 6 };
 let selection = ["b"];
 const channels = {};
 let sceneMeta = {};

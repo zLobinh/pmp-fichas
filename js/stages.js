@@ -1,8 +1,8 @@
 // "Mudanças de Status" popup, like the app's screen: the 8 stages (Livro de Regras pág. 73) and the
 // Amplification/Reduction damage points (pág. 57-58). Everything here feeds the combat math.
-import { OBR, ID, loadRules, getSheet, getItem, updateSheet, canEdit, h, syncTheme } from "./store.js?v=0.7.0";
-import { STAGES, stage, addStage, ampPoints, redPoints, setPoints, pointsText } from "./battle.js?v=0.7.0";
-import { STAGES_ID } from "./ui.js?v=0.7.0";
+import { OBR, ID, loadRules, getSheet, getItem, updateSheet, canEdit, h, syncTheme } from "./store.js?v=0.8.2";
+import { STAGES, stage, addStage, ampPoints, redPoints, setPoints, pointsText } from "./battle.js?v=0.8.2";
+import { STAGES_ID } from "./ui.js?v=0.8.2";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const root = document.getElementById("root");

@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.7.0";
-import { d } from "./rules.js?v=0.7.0";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.2";
+import { d } from "./rules.js?v=0.8.2";
 
 // ------------------------------------------------------------------ conditions
 
@@ -213,16 +213,26 @@ export function moveTiming(move) {
     bonus: pieces.some((p) => /b[oô]nus/.test(p)),
     reaction: pieces.some((p) => /^rea[cç][aã]o/.test(p)),
     both: /a[cç][aã]o\s*\+\s*a[cç][aã]o b[oô]nus/.test(t),
-    losesNextAction: /perde a a[cç][aã]o padr[aã]o|abre m[aã]o de sua a[cç][aã]o padr[aã]o/i.test(move.Description ?? ""),
+    // Helping Hand: "abre mão de sua ação no próximo turno"
+    losesNextAction: /perde a a[cç][aã]o padr[aã]o|abre m[aã]o de sua a[cç][aã]o (padr[aã]o|no pr[oó]ximo turno)/i.test(move.Description ?? ""),
+    charge: /,\s*carga/.test(t),
+    recharge: /recarga/.test(t),
   };
 }
+
+// a move used as a reaction "adianta o turno": "ação / reação" moves and Helping Hand also take
+// the action of the Pokémon's next turn
+const reactionLosesAction = (t) => t.losesNextAction || t.action;
 
 export const PRETTY = "com.pretty-initiative/metadata";
 export const inInitiative = (item) => typeof item?.metadata?.[PRETTY]?.count === "string";
 export const isActive = (item) => item?.metadata?.[PRETTY]?.active === true;
 export const econOf = (sheet) => ({ action: true, bonus: true, reaction: true, ...(sheet?.battle?.econ ?? {}) });
 
-export class TurnError extends Error {}
+// code: "offturn" (not its turn and the move isn't a reaction: it can be prepared), "used", "round"...
+export class TurnError extends Error {
+  constructor(message, code = "") { super(message); this.code = code; }
+}
 
 // decides which action a move spends right now, or throws TurnError
 // combatRunning: someone is active in Pretty Sordid
@@ -240,13 +250,18 @@ export function chooseCost(item, move, combatRunning) {
     }
     if (t.action && econ.action) return { spend: ["action"], label: "ação" };
     if (t.bonus && econ.bonus) return { spend: ["bonus"], label: "ação bônus" };
-    if (t.reaction && econ.reaction && !has(sheet, "Confused")) return { spend: ["reaction"], label: "reação", reaction: true, losesNextAction: t.losesNextAction };
-    throw new TurnError(t.bonus && !t.action ? "A ação bônus deste turno já foi usada." : "A ação deste turno já foi usada.");
+    if (t.reaction && econ.reaction && !has(sheet, "Confused")) {
+      const lose = reactionLosesAction(t);
+      return { spend: ["reaction"], label: lose ? "reação, perde a ação do próximo turno" : "reação", reaction: true, losesNextAction: lose };
+    }
+    throw new TurnError(t.bonus && !t.action ? "A ação bônus deste turno já foi usada." : "A ação deste turno já foi usada.", "used");
   }
-  if (!t.reaction) throw new TurnError("Não é o turno deste Pokémon (só Moves de reação podem ser usados fora do turno).");
+  if (!t.reaction) throw new TurnError("Não é o turno deste Pokémon (só Moves de reação podem ser usados fora do turno).", "offturn");
   if (has(sheet, "Confused")) throw new TurnError("Confuso: não pode usar reações.");
   if (!econ.reaction) throw new TurnError("A reação já foi usada (volta no início do próximo turno deste Pokémon).");
-  return { spend: ["reaction"], label: "reação", reaction: true, losesNextAction: t.losesNextAction };
+  if (econ.loseAction && reactionLosesAction(t)) throw new TurnError("Já adiantou a ação do próximo turno (usou uma reação que gasta a ação).");
+  const lose = reactionLosesAction(t);
+  return { spend: ["reaction"], label: lose ? "reação, perde a ação do próximo turno" : "reação", reaction: true, losesNextAction: lose };
 }
 
 export function spend(sheet, cost) {
@@ -255,6 +270,7 @@ export function spend(sheet, cost) {
   sheet.battle.econ = { ...econOf(sheet) };
   for (const k of cost.spend) sheet.battle.econ[k] = false;
   if (cost.losesNextAction) sheet.battle.econ.loseAction = true;
+  if (cost.recharge) { sheet.battle.econ.loseAction = true; sheet.battle.econ.loseReaction = true; sheet.battle.econ.reaction = false; }
 }
 
 // ------------------------------------------------------------------ before a move: can it act at all?
@@ -336,6 +352,11 @@ export async function endTurn(rules, item) {
   const sleepRoll = has(getSheet(item), "Asleep") ? d(6) : null;
   await updateSheet(item.id, (sheet) => {
     const b = sheet.battle;
+    // a charge/invulnerable phase not used by the end of its next turn is lost
+    if (b.charging && (b.turns ?? 0) >= (b.charging.readyAt ?? 0)) {
+      notes.push(b.charging.invuln ? `🌀 ${b.charging.move}: reapareceu sem atacar` : `⚡ ${b.charging.move}: a carga se perdeu`);
+      delete b.charging;
+    }
     b.turns = (b.turns ?? 0) + 1;
     const cond = conditionsOf(sheet);
     b.cond = cond;
@@ -379,9 +400,23 @@ export async function startTurn(rules, item) {
     const b = sheet.battle;
     const cond = conditionsOf(sheet);
     b.cond = cond;
-    b.econ = { ...econOf(sheet), reaction: true };
+    const recharging = !!b.econ?.loseReaction;
+    b.econ = { ...econOf(sheet), reaction: !recharging };
+    delete b.econ.loseReaction;
     if (b.paraLock) { delete b.paraLock; }
-    if (b.econ.loseAction) { b.econ.action = false; b.econ.loseAction = false; notes.push("perdeu a ação padrão deste turno (usou reação)"); }
+    if (b.econ.loseAction) {
+      b.econ.action = false; b.econ.loseAction = false;
+      notes.push(recharging ? "recarregando: sem ação padrão nem reação neste turno" : "perdeu a ação padrão deste turno (adiantou com uma reação)");
+    }
+    // movement for this turn (pág. 50): starts from where it stands
+    const prone = b.prone;
+    b.move = { used: 0, pos: { ...item.position }, dash: false, standUp: !!prone };
+    delete b.prone;
+    if (prone) notes.push("levantou (metade do deslocamento)");
+    delete b.grounded; // Smack Down: flight back once it can move again
+    if (b.charging && b.charging.focus) notes.push(`👊 ${b.charging.move} pronto: use agora (ação livre)`);
+    else if (b.charging?.invuln) notes.push(`🌀 ${b.charging.move}: escolha o alvo e ataque (ação)`);
+    else if (b.charging) notes.push(`⚡ ${b.charging.move} carregado: libere com uma ação`);
     if (cond.Frozen) {
       const age = (cond.Frozen.age ?? 0) + 1;
       cond.Frozen.age = age;
@@ -422,7 +457,7 @@ export async function endCombat(items) {
       for (const k of Object.keys(cond)) if (!CONDITIONS[k]?.nonVolatile) delete cond[k];
       if (cond.BadlyPoisoned) { delete cond.BadlyPoisoned; cond.Poisoned = { since: 0, age: 0 }; }
       if (cond.Drowsy) delete cond.Drowsy;
-      sheet.battle = { cond };
+      sheet.battle = { cond, ...(sheet.battle?.alt ? { alt: sheet.battle.alt } : {}) };
       sheet.pkmn.stages = {};
       delete sheet.pkmn.damage_amp; // like the app's reset_battle_stages
       delete sheet.pkmn.damage_red;
@@ -432,7 +467,8 @@ export async function endCombat(items) {
 }
 
 // watches Pretty Sordid and runs the turn hooks once (GM only); state kept in the scene
-export function watchTurns(rules) {
+// onTurnStart(item): runs after the turn-start rules (prepared actions)
+export function watchTurns(rules, { onTurnStart } = {}) {
   let busy = false, again = false;
   const tick = async () => {
     if (busy) { again = true; return; } // a turn change while busy: run again right after
@@ -459,13 +495,21 @@ export function watchTurns(rules) {
         log.push(`Turno de ${active.name}${notes.length ? `: ${notes.join("; ")}` : ""}`);
       }
       for (const text of log) await pushLog({ kind: "note", attacker: "Combate", text });
+      if (byId.has(active.id) && onTurnStart) {
+        try { await onTurnStart((await OBR.scene.items.getItems([active.id]))[0]); }
+        catch (e) { await pushLog({ kind: "note", attacker: "Combate", text: `Ação preparada de ${active.name} falhou: ${e.message}` }); }
+      }
     } finally {
       busy = false;
       if (again) { again = false; tick(); }
     }
   };
-  OBR.scene.items.onChange(() => tick());
-  OBR.scene.onMetadataChange(() => tick());
+  // Pretty Sordid (and "Passar turno") change the active token and the round in two separate
+  // updates: wait for both to land, or the turn would start twice
+  let timer = null;
+  const soon = () => { clearTimeout(timer); timer = setTimeout(tick, 350); };
+  OBR.scene.items.onChange(soon);
+  OBR.scene.onMetadataChange(soon);
   tick();
 }
 
@@ -527,15 +571,45 @@ export function marksText(sheet) {
   const parts = Object.keys(cond).map((k) => `${CONDITIONS[k]?.icon ?? ""} ${CONDITIONS[k]?.label ?? k}`);
   for (const [k, v] of Object.entries(sheet.pkmn.stages ?? {})) if (v) parts.push(`${v > 0 ? "▲" : "▼"} ${STAGE_SHORT[k] ?? k} ${v > 0 ? "+" : ""}${v}`);
   if (sheet.battle?.helped) parts.push("🤝 Helping Hand");
+  const b = sheet.battle ?? {};
+  if (b.charging?.invuln) parts.push(`🌀 Invulnerável (${b.charging.move})`);
+  else if (b.charging?.focus) parts.push(`👊 Focando`);
+  else if (b.charging) parts.push(`⚡ Carregando ${b.charging.move}`);
+  if (b.prepared) parts.push("⏳ Ação preparada");
+  if (b.alt > 0) parts.push(`✈ ${String(b.alt).replace(".", ",")} m`);
+  if (b.prone) parts.push("🤕 Caído");
   return parts.join("  ");
+}
+
+// Pretty Sordid's order (ids), only those still in the initiative
+async function prettyOrder() {
+  const meta = await OBR.scene.getMetadata();
+  const inits = await OBR.scene.items.getItems(inInitiative);
+  const ids = new Set(inits.map((i) => i.id));
+  let order = Object.values(meta["com.pretty-initiative/order"] ?? {}).filter((id) => ids.has(id));
+  for (const it of inits) if (!order.includes(it.id)) order.push(it.id); // not sorted yet
+  return { meta, order, inits };
+}
+
+// "Passar turno": the next one in Pretty Sordid's order becomes active (a new round after the last)
+export async function passTurn(fromId) {
+  const { meta, order, inits } = await prettyOrder();
+  if (!order.length) return null;
+  const current = fromId ?? inits.find(isActive)?.id;
+  const idx = order.indexOf(current);
+  const nextIdx = idx < 0 ? 0 : (idx + 1) % order.length;
+  const next = order[nextIdx];
+  if (idx >= 0 && nextIdx <= idx) await OBR.scene.setMetadata({ "com.pretty-initiative/roundCount": Number(meta["com.pretty-initiative/roundCount"] ?? 1) + 1 });
+  await OBR.scene.items.updateItems(inits.map((i) => i.id), (ds) => {
+    for (const d0 of ds) if (d0.metadata[PRETTY]) d0.metadata[PRETTY].active = d0.id === next;
+  });
+  return next;
 }
 
 // takes a fainted Pokémon out of Pretty Sordid (passing the turn on if it was its turn)
 async function leaveInitiative(token) {
-  const meta = await OBR.scene.getMetadata();
-  const order = Object.values(meta["com.pretty-initiative/order"] ?? {});
+  const { meta, order } = await prettyOrder();
   const wasActive = isActive(token);
-  await OBR.scene.items.updateItems([token.id], (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
   const rest = order.filter((id) => id !== token.id);
   const patch = { "com.pretty-initiative/order": Object.fromEntries(rest.map((id, i) => [i, id])) };
   if (wasActive && rest.length) {
@@ -545,6 +619,7 @@ async function leaveInitiative(token) {
     if (!nextId) patch["com.pretty-initiative/roundCount"] = Number(meta["com.pretty-initiative/roundCount"] ?? 1) + 1;
     await OBR.scene.items.updateItems([next], (ds) => { for (const d0 of ds) if (d0.metadata[PRETTY]) d0.metadata[PRETTY].active = true; });
   }
+  await OBR.scene.items.updateItems([token.id], (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
   await OBR.scene.setMetadata(patch);
   await pushLog({ kind: "note", attacker: "Combate", text: `${token.name} desmaiou e saiu da iniciativa` });
 }

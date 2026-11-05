@@ -50,6 +50,13 @@ const mod = (score) => Math.floor((score - 10) / 2);
 export class Rules {
   constructor({ moves, pokemon, rules }) {
     this.moves = moves;
+    // a few app moves describe a save ("teste de CON contra sua CD de Move") without the "Save" field
+    const SAVE_RX = /teste (?:de resist[eê]ncia )?de (FOR|DES|CON|INT|SAB|CAR)\b[^.]{0,40}?contra (?:a )?sua CD/i;
+    const PT_ATTR = { FOR: "STR", DES: "DEX", CON: "CON", INT: "INT", SAB: "WIS", CAR: "CHA" };
+    for (const m of Object.values(moves)) {
+      const s = !m.Save && SAVE_RX.exec(m.Description ?? "");
+      if (s) m.Save = PT_ATTR[s[1].toUpperCase()];
+    }
     this.species = pokemon;
     this.leveling = rules.leveling;
     this.natures = rules.natures;
@@ -119,6 +126,15 @@ export class Rules {
     const out = {};
     for (const k of ATTRS) out[k] = mod(attrs[k]) + loyalty + (profs.has(k) ? this.proficiency(pkmn) : 0);
     return out;
+  }
+
+  // M.get_all_speed in meters (the data is in feet: 5 ft = 1,5 m). Velocidade stage: +1,5 m each;
+  // "Mobilidade" feat: +3 m. Items/abilities not included.
+  speeds(pkmn) {
+    const sp = this.speciesData(pkmn) ?? {};
+    const extra = (pkmn.stages?.Speed ?? 0) * 5 + (this.featCount(pkmn, "Mobilidade") ? 10 : 0);
+    const m = (ft) => (ft ? Math.max(0, ((ft + extra) / 5) * 1.5) : 0);
+    return { walk: m(sp.WSp), fly: m(sp.Fsp), swim: m(sp.Ssp), climb: m(sp["Climbing Speed"]), burrow: m(sp["Burrowing Speed"]) };
   }
 
   // M.get_initiative_modifier (without speed stage, item and ability bonuses)

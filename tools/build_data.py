@@ -15,11 +15,14 @@ from pathlib import Path
 
 DEFAULT_APP = Path(r"C:\Users\Keven\Documents\.Pokemon RPG #############\PMP\Pokedex5E-master")
 SPECIES_KEEP = ("AC", "HP", "Hit Dice", "Type", "attributes", "saving_throws", "Abilities", "Hidden Ability",
-                "Skill", "Senses", "size", "index", "SR", "WSp", "MIN LVL FD", "variant_data")
+                "Skill", "Senses", "size", "index", "SR", "MIN LVL FD", "variant_data",
+                # speeds in feet, same keys as the app's pokedex.get_*_speed
+                "WSp", "Fsp", "Ssp", "Climbing Speed", "Burrowing Speed")
 
 
 def load(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    # strict=False: some app files have raw tabs/line breaks inside strings
+    return json.loads(Path(path).read_text(encoding="utf-8"), strict=False)
 
 
 def main():

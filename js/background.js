@@ -1,11 +1,13 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.7.0";
-import { describe } from "./combat.js?v=0.7.0";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.7.0";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.7.0";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.7.0";
-import { watchTurns, watchMarks } from "./battle.js?v=0.7.0";
-import { loadRules } from "./store.js?v=0.7.0";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.8.2";
+import { describe } from "./combat.js?v=0.8.2";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.8.2";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.8.2";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.8.2";
+import { watchTurns, watchMarks } from "./battle.js?v=0.8.2";
+import { watchMovement, TOAST } from "./tactics.js?v=0.8.2";
+import { runPrepared } from "./prepared.js?v=0.8.2";
+import { loadRules } from "./store.js?v=0.8.2";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -90,11 +92,20 @@ OBR.onReady(() => {
     viewer = { id: OBR.player.id, role };
     if (role !== "GM") return;
     const rules = await loadRules();
-    const start = () => { watchTurns(rules); watchMarks(rules); };
+    const start = () => {
+      watchTurns(rules, { onTurnStart: (item) => runPrepared(rules, item) });
+      watchMarks(rules);
+      watchMovement(rules);
+    };
     if (await OBR.scene.isReady()) start();
     else {
       const off = OBR.scene.onReadyChange((ready) => { if (ready) { off(); start(); } });
     }
+  });
+
+  // movement warnings (token sent back): for the owner and the GM
+  OBR.broadcast.onMessage(TOAST, ({ data }) => {
+    if (viewer.role === "GM" || data.owner === viewer.id) OBR.notification.show(data.text, "WARNING");
   });
 
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {

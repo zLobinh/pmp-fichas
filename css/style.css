@@ -153,6 +153,10 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .slot.on { color: var(--good); border-color: var(--good); }
 .slot.off { color: var(--muted); text-decoration: line-through; opacity: .7; }
 .tt { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--panel-2); color: var(--muted); vertical-align: middle; }
+.tt.phase { margin-left: 4px; color: var(--warn, #f0b03f); }
+.hud-moverow { flex-wrap: wrap; padding: 2px 6px; }
+.hud-moverow button.icon { padding: 0 6px; min-width: 0; }
+.hud-wait { gap: 6px; padding: 2px 6px; }
 .chip.cond { border-color: var(--warn); }
 .chip.up { border-color: var(--good); color: var(--good); }
 .chip.down { border-color: var(--bad); color: var(--bad); }
@@ -177,3 +181,6 @@ body.dragging::after {
 .chip.team-jogadores { border-color: var(--good); }
 .chip.team-inimigos { border-color: var(--bad); }
 select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
+
+/* ficha rápida que não cabe onde está: rola em vez de cortar */
+body.hud-body.hud-scroll { height: 100vh; overflow-y: auto; }

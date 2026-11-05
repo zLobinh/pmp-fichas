@@ -1,13 +1,14 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, canEdit, h, syncTheme } from "./store.js?v=0.7.0";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.7.0";
-import { useMove, TurnError } from "./combat.js?v=0.7.0";
-import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, die, markHudAlive } from "./ui.js?v=0.7.0";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.7.0";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.7.0";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints } from "./battle.js?v=0.7.0";
-import { seesTarget } from "./combat.js?v=0.7.0";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.8.2";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.8.2";
+import { useMove, TurnError, throwAttack, THROW, throwRange } from "./combat.js?v=0.8.2";
+import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.8.2";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.8.2";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.8.2";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn } from "./battle.js?v=0.8.2";
+import { seesTarget } from "./combat.js?v=0.8.2";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude } from "./tactics.js?v=0.8.2";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -31,12 +32,31 @@ async function setAttacker(id) {
   Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, last: null });
 }
 
+// the move being aimed (Arremessar is not a move of the sheet)
+function pendingMove() {
+  const pkmn = getSheet(state.item).pkmn;
+  if (state.pending === THROW) {
+    const m = throwRange(state.rules, pkmn);
+    return { name: THROW, label: "Arremessar", rangeInfo: { kind: "ranged", meters: m, label: fmtM(m) } };
+  }
+  return state.rules.moveData(pkmn, state.pending);
+}
+
 async function updateRanges() {
   state.ranges = new Map();
   if (!state.pending || !state.targets.length) return;
-  const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
-  for (const r of await checkRange(state.item, move, state.targets)) state.ranges.set(r.id, r);
+  const move = pendingMove();
+  const ch = chargingOf(getSheet(state.item));
+  // Fly/Dig...: counted from where the move was activated
+  const from = ch?.invuln && ch.move === state.pending && ch.from ? { ...state.item, position: ch.from, metadata: {} } : state.item;
+  const jump = move.rangeInfo.kind === "melee" ? await jumpOpts(state.rules, state.item) : null;
+  for (const r of await checkRange(from, move, state.targets, { jump })) {
+    const inv = invulnCheck(getSheet(state.targets.find((t) => t.id === r.id)), state.pending);
+    state.ranges.set(r.id, inv?.blocked ? { ...r, ok: false, reason: inv.reason, invuln: true } : r);
+  }
 }
+
+const running = async () => (await OBR.scene.items.getItems((i) => i.metadata?.["com.pretty-initiative/metadata"]?.active === true)).length > 0;
 
 async function onSelection(selection) {
   const ids = selection ?? [];
@@ -113,7 +133,9 @@ function initiativeBlock(pkmn) {
     init?.active ? h("b", { class: "turn-tag" }, "▶ SUA VEZ") : null,
     h("span", { class: "muted small" }, init ? `Init ${init.count}` : "Fora da iniciativa"),
     inInitiative(state.item) ? [slot("action", "Ação"), slot("bonus", "Bônus"), slot("reaction", "Reação")] : null,
+    econ.loseAction ? h("span", { class: "chip down", title: "Usou uma reação que adianta o turno: o próximo turno começa sem a ação padrão" }, "−Ação próx.") : null,
     h("span", { class: "spacer" }),
+    init?.active ? h("button", { class: "small", disabled: state.busy, title: "Passa a vez pro próximo da iniciativa", onclick: () => act(async () => { await passTurn(state.attackerId); }) }, "⏭ Passar") : null,
     h("button", {
       class: "small",
       disabled: state.busy,
@@ -128,6 +150,76 @@ function initiativeBlock(pkmn) {
     }, `🎲 ${signed(state.rules.initiative(pkmn))}`));
 }
 
+// runs a button's action with the busy flag; errors become notifications
+async function act(fn) {
+  state.busy = true;
+  render();
+  try { await fn(); }
+  catch (e) { OBR.notification.show(e.message, e instanceof TurnError ? "WARNING" : "ERROR"); }
+  finally { state.busy = false; state.item = await getItem(state.attackerId); render(); }
+}
+
+// movement this turn, Disparada, flight, jumps, throwing
+function moveBlock() {
+  const { rules } = state;
+  const mv = movement(rules, state.item);
+  const j = jumps(rules, state.item);
+  const tracking = mv.tracking && state.running;
+  const mine = isActive(state.item);
+  const econ = econOf(getSheet(state.item));
+  const speeds = [mv.walk ? `andar ${fmtM(mv.walk)}` : null, mv.fly ? `voo ${fmtM(mv.fly)}` : null, mv.swim ? `nado ${fmtM(mv.swim)}` : null].filter(Boolean).join(" · ");
+  return h("div", { class: "row hud-moverow small", style: "gap:4px;margin:2px 0" },
+    tracking
+      ? h("span", { class: `chip ${mv.left <= 0 ? "down" : ""}`, title: `${speeds}${mv.why ? ` · ${mv.why}` : ""}${mv.dash ? " · Disparada" : ""}. Arraste o token no mapa: os metros saem daqui.` },
+          `👣 ${fmtM(mv.used)} / ${fmtM(mv.budget)}`)
+      : h("span", { class: "muted", title: mv.why || "" }, `👣 ${speeds || "sem deslocamento"}`),
+    tracking ? h("button", {
+      class: "small", disabled: state.busy || !mine || !econ.action || mv.dash,
+      title: "Disparada: gasta a ação e dobra o deslocamento deste turno",
+      onclick: () => act(() => dash(rules, state.item)),
+    }, mv.dash ? "💨 Disparada" : "💨 Disparar") : null,
+    mv.fly > 0 ? [
+      h("span", { class: `chip ${mv.alt >= 3 ? "up" : ""}`, title: mv.alt >= 3 ? "Elevado (3 m ou mais): imune a Moves de Terra; ataques à distância além da metade do alcance com desvantagem" : "Abaixo de 3 m não conta como Elevado" }, `✈ ${fmtM(mv.alt)}`),
+      h("button", { class: "small icon", disabled: state.busy, title: "Voar 1,5 m pra cima (gasta 1,5 m de deslocamento)", onclick: () => act(() => changeAltitude(rules, state.item, 1.5)) }, "▲"),
+      h("button", { class: "small icon", disabled: state.busy || mv.alt <= 0, title: "Descer 1,5 m (gasta 1,5 m de deslocamento)", onclick: () => act(() => changeAltitude(rules, state.item, -1.5)) }, "▼"),
+    ] : null,
+    h("span", { class: "spacer" }),
+    mv.alt === 0 ? h("span", { class: "muted", title: `Salto em altura ${fmtM(j.high)}, em distância ${fmtM(j.long)} (${j.ran ? "com corrida de 3 m" : "parado: metade; ande 3 m antes pra saltar o dobro"}). Num Move corpo a corpo contra um voador, o pulo é automático e gasta deslocamento.` }, `🦘 ${fmtM(j.high)}`) : null,
+    h("button", {
+      class: `small ${state.pending === THROW ? "primary" : ""}`, disabled: state.busy,
+      title: `Arremessar (ação): objeto ou criatura até ${fmtM(throwRange(rules, getSheet(state.item).pkmn))}. d20 + FOR contra a CA, 1d6 + FOR de dano. Acerta voadores.`,
+      onclick: async () => {
+        Object.assign(state, { pending: THROW, mode: "target", outOfRange: null, turnError: null, helperCands: [], helpers: new Set() });
+        const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
+        state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
+        await updateRanges();
+        render();
+      },
+    }, "🤾 Arremessar"));
+}
+
+// what's waiting: a prepared action, a charge, an invulnerable phase
+function waitingBlock() {
+  const b = getSheet(state.item).battle ?? {};
+  const rows = [];
+  if (b.prepared) {
+    rows.push(h("div", { class: "row small hud-wait" },
+      h("span", { class: "chip cond", title: "Usado fora do turno: no início do turno ele anda até o alcance (se der) e usa sozinho" }, `⏳ Preparado: ${b.prepared.label ?? b.prepared.move}${b.prepared.targetNames?.length ? ` → ${b.prepared.targetNames.join(", ")}` : ""}`),
+      h("span", { class: "spacer" }),
+      h("button", { class: "small", disabled: state.busy, onclick: () => act(() => updateSheet(state.attackerId, (s) => { delete s.battle.prepared; })) }, "Cancelar")));
+  }
+  const c = b.charging;
+  if (c) {
+    const ready = releaseReady(getSheet(state.item), state.running);
+    const text = c.invuln ? `🌀 ${invulnText(c)}` : c.focus ? `👊 Focando (${c.move})` : `⚡ Carregando ${c.move}`;
+    rows.push(h("div", { class: "row small hud-wait" },
+      h("span", { class: "chip up" }, text),
+      h("span", { class: "muted" }, ready ? (c.focus ? "pronto: use já (ação livre)" : "pronto: use o Move (ação)") : "sai no próximo turno")));
+  }
+  if (b.prone) rows.push(h("div", { class: "row small hud-wait" }, h("span", { class: "chip down", title: "Levantar custa metade do deslocamento no próximo turno" }, "🤕 Caído")));
+  return rows;
+}
+
 // "A" action, "B" bonus action, "R" reaction: what the move can spend
 function timingTag(name) {
   const t = moveTiming(state.rules.moves[name] ?? {});
@@ -136,7 +228,15 @@ function timingTag(name) {
 }
 
 function moveRow(m) {
-  const noPP = typeof m.pp === "number" && m.pp <= 0;
+  const sheet = getSheet(state.item);
+  const sp = special(state.rules, m.name);
+  const ch = chargingOf(sheet);
+  const releasing = ch?.move === m.name;
+  const twoTurns = sp && ["invuln", "focus", "charge"].includes(sp.kind);
+  const activating = twoTurns && !releasing;
+  const lockedOut = invulnOf(sheet) && !releasing; // invulnerable: only its own move
+  const noPP = !releasing && typeof m.pp === "number" && m.pp <= 0;
+  const phase = releasing ? (releaseReady(sheet, state.running) ? (sp?.kind === "invuln" ? "🌀 atacar" : "⚡ liberar") : "⏳ carregando") : twoTurns ? "2 turnos" : sp?.kind === "recharge" ? "recarga" : null;
   const nums = [
     m.attackBonus != null ? `Acerto ${signed(m.attackBonus)}` : null,
     m.saveDC != null ? `CD ${m.saveDC} ${ATTR_PT[m.save] ?? m.save}` : null,
@@ -147,11 +247,19 @@ function moveRow(m) {
   return h("button", {
     class: `hud-move ${selected ? "sel" : ""}`,
     style: `--type:${TYPE_COLOR[m.type] ?? "#777"}`,
-    disabled: noPP || state.busy,
-    title: `${TYPE_PT[m.type] ?? m.type} · ${[m.time, m.range].filter(Boolean).join(" · ")}`,
+    disabled: noPP || state.busy || lockedOut,
+    title: `${TYPE_PT[m.type] ?? m.type} · ${[m.time, m.range].filter(Boolean).join(" · ")}${lockedOut ? " · invulnerável: só pode usar " + ch.move : ""}`,
     onclick: async () => {
       state.pending = m.name;
       state.outOfRange = null;
+      if (activating) {
+        // first part of Fly/Dig/Focus Punch/Solar Beam...: no targets yet
+        state.mode = "self";
+        state.targets = [];
+        state.turnError = null;
+        await roll(true);
+        return;
+      }
       if (m.rangeInfo.kind === "area") {
         // turn/action check first, so nobody aims for nothing
         try {
@@ -197,7 +305,7 @@ function moveRow(m) {
       render();
     },
   },
-    h("span", { class: "hud-move-name" }, timingTag(m.name), " ", m.label.replace(/ PMP$/, "")),
+    h("span", { class: "hud-move-name" }, timingTag(m.name), " ", m.label.replace(/ PMP$/, ""), phase ? h("span", { class: "tt phase" }, phase) : null),
     h("span", { class: "hud-move-nums" }, nums || "sem rolagem"),
     h("span", { class: `hud-move-pp ${noPP ? "no" : ""}` }, typeof m.pp === "number" ? `${m.pp}/${m.ppMax}` : "∞"));
 }
@@ -206,7 +314,7 @@ function moveRow(m) {
 async function findHelpers(m) {
   state.helperCands = [];
   state.helpers = new Set();
-  if (m.attackBonus == null && !m.damage) return;
+  if (m.name === THROW || (m.attackBonus == null && !m.damage)) return;
   const items = await OBR.scene.items.getItems((i) => i.metadata?.["com.pmp-fichas/sheet"]?.pkmn?.moves?.[HELPING_HAND] && i.id !== state.attackerId);
   for (const it of items) {
     const s = getSheet(it);
@@ -216,6 +324,8 @@ async function findHelpers(m) {
     if (s.pkmn.hp.current <= 0) reason = "desmaiado";
     else if (typeof pp === "number" && pp <= 0) reason = "sem PP";
     else if (inInitiative(it) && !econOf(s).reaction) reason = "reação já usada";
+    else if (inInitiative(it) && econOf(s).loseAction) reason = "já adiantou a ação";
+    else if (invulnOf(s)) reason = "invulnerável";
     else if (has(s, "Confused") || has(s, "Asleep") || has(s, "Frozen") || has(s, "Stunned")) reason = "não pode reagir";
     else if ((await distanceMeters(it, state.item)) > 18.05) reason = "longe (mais de 18 m)";
     state.helperCands.push({ item: it, reason });
@@ -229,15 +339,15 @@ function helpersRow() {
     state.helperCands.map(({ item, reason }) => h("span", {
       class: `chip ${state.helpers.has(item.id) ? "on" : ""} ${reason ? "far" : ""}`,
       style: reason ? "opacity:.6" : "cursor:pointer",
-      title: reason || "Gasta a reação deste Pokémon: +1d6 no acerto e mais dados de dano",
+      title: reason || "Gasta a reação deste Pokémon e a ação do próximo turno dele: +1d6 no acerto e mais dados de dano",
       onclick: reason ? null : () => { state.helpers.has(item.id) ? state.helpers.delete(item.id) : state.helpers.add(item.id); render(); },
     }, `🤝 ${item.name}${reason ? ` (${reason})` : ""}`)));
 }
 
 function targetBar() {
   if (state.mode !== "target") return null;
-  const move = state.rules.moveData(getSheet(state.item).pkmn, state.pending);
-  const cancel = () => { Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null }); render(); };
+  const move = pendingMove();
+  const cancel = () => { Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null }); render(); };
   return h("div", { class: "hud-target" },
     h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), ` · alcance ${move.rangeInfo.label}`),
     h("div", { class: "small muted" }, "Clique nos alvos no mapa (Shift+clique pra vários)."),
@@ -249,7 +359,8 @@ function targetBar() {
             return h("span", { class: `chip on ${r && !r.ok ? "far" : ""}`, title: r?.reason ?? "" },
               t.name || "Token",
               p && canSeeFull(getSheet(t), state.viewer) ? ` · CA ${state.rules.ac(p)}` : "",
-              r?.meters != null ? ` · ${fmtM(r.meters)}` : "",
+              r?.invuln ? " · 🌀 invulnerável" : r?.meters != null ? ` · ${fmtM(r.meters)}` : "",
+              r?.jump ? ` · 🦘 pula ${fmtM(r.jump)}` : "",
               r ? (r.ok ? " ✓" : " ✗") : "");
           })
         : h("span", { class: "muted small" }, "Nenhum alvo: rola só o dano.")),
@@ -261,8 +372,11 @@ function targetBar() {
       ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.turnError)
       : null,
     h("div", { class: "row" },
+      state.turnCode === "offturn" && state.pending !== THROW
+        ? h("button", { class: "primary", disabled: state.busy, title: "Fica travado neste Move: no início do turno ele anda até o alcance e usa sozinho", onclick: () => prepare() }, "⏳ Preparar")
+        : null,
       state.turnError && state.isGM
-        ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true, false, true) }, "Usar mesmo assim (mestre)")
+        ? h("button", { class: state.turnCode === "offturn" ? "" : "primary", disabled: state.busy, onclick: () => roll(true, false, true) }, "Usar mesmo assim (mestre)")
         : state.outOfRange
           ? h("button", { class: "primary", disabled: state.busy, onclick: () => roll(true) }, "Rolar mesmo assim")
           : h("button", { class: "primary", disabled: state.busy || (state.turnError && !state.isGM), onclick: () => roll(false) }, state.busy ? "Rolando…" : "Rolar"),
@@ -345,15 +459,20 @@ async function roll(ignoreRange, area = false, force = false) {
   try {
     state.item = await getItem(state.attackerId);
     const helpers = state.helperCands?.filter((c) => state.helpers?.has(c.item.id)).map((c) => c.item) ?? [];
-    state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers });
+    state.last = state.pending === THROW
+      ? await throwAttack(state.rules, state.item, state.targets[0], { ignoreRange, force })
+      : await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers });
     state.last._fresh = state.last.roller !== "Dice+";
-    Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, helperCands: [], helpers: new Set() });
+    Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, turnCode: null, helperCands: [], helpers: new Set() });
     await OBR.player.select([state.attackerId], true); // back to the attacker
   } catch (e) {
     if (e instanceof OutOfRange) state.outOfRange = e;
     else if (e instanceof TurnError) {
-      // out of turn / action already used: players are blocked, the GM may force it
+      // out of its turn with a move that isn't a reaction: a player's choice is locked in (prepared);
+      // the GM may prepare it or force it
       state.turnError = e.message;
+      state.turnCode = e.code;
+      if (e.code === "offturn" && !area && state.pending !== THROW && !state.isGM) { await prepare(); return; }
       if (state.mode !== "target") { OBR.notification.show(e.message, "WARNING"); if (!state.isGM) Object.assign(state, { mode: "idle", pending: null }); else state.mode = "target"; }
     } else {
       OBR.notification.show(e.message, "ERROR");
@@ -363,6 +482,19 @@ async function roll(ignoreRange, area = false, force = false) {
     state.busy = false;
     render();
   }
+}
+
+// "Ação preparada": locked into this move; it runs by itself when the Pokémon's turn starts
+async function prepare() {
+  const move = pendingMove();
+  const targets = state.targets.filter((t) => t.id !== state.attackerId);
+  await updateSheet(state.attackerId, (s) => {
+    s.battle.prepared = { move: state.pending, label: move.label.replace(/ PMP$/, ""), targetIds: targets.map((t) => t.id), targetNames: targets.map((t) => t.name) };
+  });
+  await pushLog({ kind: "note", attacker: state.item.name, text: `⏳ preparou ${move.label.replace(/ PMP$/, "")}${targets.length ? ` contra ${targets.map((t) => t.name).join(", ")}` : ""} (sai no início do turno dele)` });
+  Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, turnCode: null, helperCands: [], helpers: new Set(), busy: false });
+  state.item = await getItem(state.attackerId);
+  render();
 }
 
 async function close() {
@@ -397,6 +529,8 @@ function render() {
       h("button", { class: "icon", title: "Fechar", onclick: close }, "✕")),
     hpBlock(pkmn),
     initiativeBlock(pkmn),
+    moveBlock(),
+    waitingBlock(),
     targetBar(),
     aimBar(),
     h("div", { class: "hud-moves" }, rules.moveList(pkmn).map(moveRow)),
@@ -419,9 +553,11 @@ function startDrag(ev) {
     document.body.classList.remove("dragging");
     const dx = e.screenX - start.x, dy = e.screenY - start.y;
     if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
-    const height = await OBR.viewport.getHeight();
-    const pos = hudPosition(height);
-    saveHudPosition({ left: Math.round(pos.left + dx), bottom: Math.round(pos.bottom + dy) });
+    const vh = await OBR.viewport.getHeight();
+    const pos = hudPosition(vh);
+    // where its top edge really is right now (in bottom mode it depends on the current height)
+    const top = hudTop(window.innerHeight, vh);
+    saveHudPosition({ left: pos.left + dx, top: top + dy });
     markHudAlive();
     await openHud(state.attackerId);
   };
@@ -430,9 +566,13 @@ function startDrag(ev) {
 }
 
 // grow/shrink the popover to its content
+// (never taller than the room where it sits: beyond that it scrolls instead of being cut off)
 function fit() {
   requestAnimationFrame(() => {
-    const height = Math.min(640, Math.ceil(root.getBoundingClientRect().height) + 2);
+    const needed = Math.ceil(root.getBoundingClientRect().height) + 2;
+    const height = Math.min(640, needed, hudRoom());
+    document.body.classList.toggle("hud-scroll", needed > height);
+    saveHudHeight(Math.min(640, needed));
     OBR.popover.setHeight(HUD_ID, height).catch(() => {});
   });
 }
@@ -443,10 +583,12 @@ OBR.onReady(async () => {
   state.isGM = (await OBR.player.getRole()) === "GM";
   state.viewer = { id: OBR.player.id, role: state.isGM ? "GM" : "PLAYER" };
   await setAttacker(state.attackerId);
+  state.running = await running();
   render();
   OBR.scene.items.onChange(async (items) => {
     const it = items.find((i) => i.id === state.attackerId);
     if (it) state.item = it;
+    state.running = items.some((i) => i.metadata?.["com.pretty-initiative/metadata"]?.active === true);
     state.targets = state.targets.map((t) => items.find((i) => i.id === t.id)).filter(Boolean);
     if (state.mode === "target") await updateRanges();
     render();
