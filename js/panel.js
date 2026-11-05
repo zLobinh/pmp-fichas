@@ -1,10 +1,27 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.8.2";
-import { describe } from "./combat.js?v=0.8.2";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.8.2";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.8.2";
-import { dicePlusReady } from "./dice.js?v=0.8.2";
-import { endCombat, canSeeFull, teamOf, TEAMS } from "./battle.js?v=0.8.2";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.8.3";
+import { describe } from "./combat.js?v=0.8.3";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.8.3";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.8.3";
+import { dicePlusReady } from "./dice.js?v=0.8.3";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.8.3";
+
+// the GM's watchers (turns, token marks, movement) run in the background of this browser:
+// shows whether they are alive and their last error
+function watchLine() {
+  let st = {};
+  try { st = JSON.parse(localStorage.getItem(WATCH_STATUS) || "{}"); } catch {}
+  const names = ["turnos", "marcas", "deslocamento"];
+  const ago = (t) => (t ? `${Math.max(0, Math.round((Date.now() - t) / 1000))} s` : "nunca");
+  return h("div", { class: "small muted", style: "margin-top:4px" },
+    "Controle do mestre: ",
+    names.map((n) => {
+      const s = st[n] ?? {};
+      const bad = s.errAt && (!s.ok || s.errAt > s.ok);
+      return h("span", { class: bad ? "no" : s.ok ? "ok" : "muted", title: s.err ? `último erro: ${s.err}` : "", style: "margin-right:6px" },
+        `${n} ${bad ? `✗ ${s.err}` : `✓ (${ago(s.ok)})`}`);
+    }));
+}
 
 const root = document.getElementById("root");
 const state = { rules: null, items: [], log: [], settings: {}, role: "PLAYER" };
@@ -52,6 +69,7 @@ function render() {
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoPP, onchange: (e) => setSettings({ autoPP: e.target.checked }) }), "Gastar 1 PP ao usar um Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.checkRange, onchange: (e) => setSettings({ checkRange: e.target.checked }) }), "Exigir que o alvo esteja no alcance do Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.moveControl, onchange: (e) => setSettings({ moveControl: e.target.checked }) }), "Controlar o deslocamento em combate (token volta se andar demais ou fora do turno)"),
+          watchLine(),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.mapFx, onchange: (e) => setSettings({ mapFx: e.target.checked }) }), "Animação no mapa (quem acertou quem)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.dicePlus, onchange: (e) => setSettings({ dicePlus: e.target.checked }) }),
             "Rolar com o Dice+ (dados 3D na tela)",

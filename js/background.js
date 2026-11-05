@@ -1,13 +1,13 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.8.2";
-import { describe } from "./combat.js?v=0.8.2";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.8.2";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.8.2";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.8.2";
-import { watchTurns, watchMarks } from "./battle.js?v=0.8.2";
-import { watchMovement, TOAST } from "./tactics.js?v=0.8.2";
-import { runPrepared } from "./prepared.js?v=0.8.2";
-import { loadRules } from "./store.js?v=0.8.2";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.8.3";
+import { describe } from "./combat.js?v=0.8.3";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.8.3";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.8.3";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.8.3";
+import { watchTurns, watchMarks } from "./battle.js?v=0.8.3";
+import { watchMovement, TOAST } from "./tactics.js?v=0.8.3";
+import { runPrepared } from "./prepared.js?v=0.8.3";
+import { loadRules } from "./store.js?v=0.8.3";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications

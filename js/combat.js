@@ -4,19 +4,19 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.2";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.8.2";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.8.2";
-import { getRoller } from "./dice.js?v=0.8.2";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.3";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.8.3";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.8.3";
+import { getRoller } from "./dice.js?v=0.8.3";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.8.2";
+} from "./battle.js?v=0.8.3";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken,
-} from "./tactics.js?v=0.8.2";
+} from "./tactics.js?v=0.8.3";
 
 export { TurnError };
 
@@ -365,6 +365,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (hit && fx.direct.length && (dmg ? p.hitFactor > 0 : !move.save)) ch.stages.push(...fx.direct);
     if (p.r.contest?.success) { if (fx.contest.status) ch.give.push(fx.contest.status); ch.stages.push(...fx.contest.stages); }
     if (fx.statusDirect && hit && !move.save) ch.give.push(fx.statusDirect);
+    if (fx.statusHit && p.r.attack?.hit) ch.give.push(fx.statusHit); // Fake Out: atordoado no acerto
     // Smack Down: an elevated Pokémon (or one in Fly/Bounce) is brought down
     if (moveName === "Smack Down" && hit && p.hitFactor > 0 && (getSheet(p.t)?.battle?.alt > 0 || p.inv?.cancel)) ch.smack = true;
   }

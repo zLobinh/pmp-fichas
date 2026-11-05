@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.2";
-import { d, fmtM } from "./rules.js?v=0.8.2";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError } from "./battle.js?v=0.8.2";
-import { pointMeters, altitudeOf, checkRange } from "./map.js?v=0.8.2";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.3";
+import { d, fmtM } from "./rules.js?v=0.8.3";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.8.3";
+import { pointMeters, altitudeOf, checkRange } from "./map.js?v=0.8.3";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -259,11 +259,8 @@ const samePos = (a, b) => a && b && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.
 // come out of what's left; too far, or out of its turn, the token goes back. Also makes fliers
 // that can't fly anymore (asleep, frozen, stunned, fainted, Smack Down) fall.
 export function watchMovement(rules) {
-  let busy = false, again = false;
   const tick = async () => {
-    if (busy) { again = true; return; }
-    busy = true;
-    try {
+    {
       const settings = await getSettings();
       const all = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] != null);
       const running = (await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY]?.active === true)).length > 0;
@@ -297,11 +294,9 @@ export function watchMovement(rules) {
           });
         }
       }
-    } finally {
-      busy = false;
-      if (again) { again = false; tick(); }
     }
   };
-  OBR.scene.items.onChange(() => tick());
-  tick();
+  const schedule = guardedLoop("deslocamento", tick, { delay: 100 });
+  OBR.scene.items.onChange(schedule);
+  schedule();
 }

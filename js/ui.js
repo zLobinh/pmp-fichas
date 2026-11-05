@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.8.2";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.8.3";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",

@@ -1,14 +1,15 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.8.2";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.8.2";
-import { useMove, TurnError, throwAttack, THROW, throwRange } from "./combat.js?v=0.8.2";
-import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.8.2";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.8.2";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.8.2";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn } from "./battle.js?v=0.8.2";
-import { seesTarget } from "./combat.js?v=0.8.2";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude } from "./tactics.js?v=0.8.2";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.8.3";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.8.3";
+import { useMove, TurnError, throwAttack, THROW, throwRange } from "./combat.js?v=0.8.3";
+import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.8.3";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.8.3";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.8.3";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.8.3";
+import { runPrepared } from "./prepared.js?v=0.8.3";
+import { seesTarget } from "./combat.js?v=0.8.3";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude } from "./tactics.js?v=0.8.3";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -135,7 +136,11 @@ function initiativeBlock(pkmn) {
     inInitiative(state.item) ? [slot("action", "Ação"), slot("bonus", "Bônus"), slot("reaction", "Reação")] : null,
     econ.loseAction ? h("span", { class: "chip down", title: "Usou uma reação que adianta o turno: o próximo turno começa sem a ação padrão" }, "−Ação próx.") : null,
     h("span", { class: "spacer" }),
-    init?.active ? h("button", { class: "small", disabled: state.busy, title: "Passa a vez pro próximo da iniciativa", onclick: () => act(async () => { await passTurn(state.attackerId); }) }, "⏭ Passar") : null,
+    init?.active ? h("button", { class: "small", disabled: state.busy, title: "Passa a vez pro próximo da iniciativa", onclick: () => act(async () => {
+      await passTurn(state.attackerId);
+      // end/start of turn right here (the GM's browser would do it too, but this way it never waits on it)
+      await processTurn(state.rules, { onTurnStart: (it) => runPrepared(state.rules, it) });
+    }) }, "⏭ Passar") : null,
     h("button", {
       class: "small",
       disabled: state.busy,

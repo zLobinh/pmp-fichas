@@ -46,6 +46,10 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   ("Usar mesmo assim"). Sem ninguém ativo no Pretty Sordid, nada é cobrado (jogo livre).
 - **Fake Out:** só na 1ª rodada do Pretty Sordid (como ação ou reação).
 - **⏭ Passar turno:** botão na ficha rápida quando é a vez do Pokémon (passa pro próximo; depois do último, nova rodada).
+  Quem aperta já processa o fim/início do turno (ações de volta, dano de condição), sem depender do mestre.
+- **Controle do mestre:** o fim/início de turno (quando o turno é passado pelo Pretty Sordid), as barras de HP e o
+  controle de deslocamento rodam no navegador do mestre. O painel mostra se estão ativos
+  (*Controle do mestre: turnos ✓ ...*) e o último erro, se houver; erros também aparecem como notificação pro mestre.
 - **Ação preparada:** se um jogador escolhe fora do turno um Move que não é reação, ele fica travado nesse Move
   (⏳ na ficha rápida, com *Cancelar*). No início do turno do Pokémon, a extensão usa sozinha: se o alvo está no
   alcance, ataca; senão, anda pelo caminho mais curto até o alcance (gastando deslocamento) e ataca. Sem

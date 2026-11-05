@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.2";
-import { d } from "./rules.js?v=0.8.2";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.3";
+import { d } from "./rules.js?v=0.8.3";
 
 // ------------------------------------------------------------------ conditions
 
@@ -153,7 +153,7 @@ function stagesIn(sentence) {
 
 function statusIn(sentence) {
   // "fica Queimado", "o alvo fica Paralisado", "é envenenada", "ficando paralisado" (no \b: it fails next to accents)
-  if (!/(^|\s)(fica|ficar|ficará|ficando|torna|é|será|cai no sono|dorme|adormec)/i.test(sentence)) return null;
+  if (!/(^|\s)(fica|ficar|ficará|ficando|fique|fiquem|ficam|torna|é|será|cai no sono|dorme|adormec)/i.test(sentence)) return null;
   for (const [re, key] of STATUS_WORDS) if (re.test(sentence)) return key;
   return null;
 }
@@ -164,7 +164,7 @@ export function moveEffects(move) {
   const sentences = desc.split(/(?<=[.!?])\s+/);
   const pessoal = /^pessoal/i.test((move.Range ?? "").trim());
   const area = /cone|linha|raio|semic/i.test(move.Range ?? "");
-  const fx = { self: [], fail: [], direct: [], natural: null, contest: null, statusFail: null, statusDirect: null };
+  const fx = { self: [], fail: [], direct: [], natural: null, contest: null, statusFail: null, statusDirect: null, statusHit: null };
   for (let i = 0; i < sentences.length; i++) {
     const s = sentences[i];
     const contest = s.match(/Role 1d20 \+ MOVE \+ (\d+) e compare o resultado com 10 \+ (FOR|DES|CON|INT|SAB|CAR)/i);
@@ -194,6 +194,8 @@ export function moveEffects(move) {
     if (status) {
       if (onFail) fx.statusFail ??= status;
       else if (!move.Damage && !move.atk && !(pessoal && !area)) fx.statusDirect ??= status;
+      // attack moves: "...e fazendo com que o alvo fique atordoado em um acerto" (Fake Out)
+      else if (move.atk && !move.Save && /\bacerto\b/i.test(s) && !/\bse\b[^,.]*\b(estiver|for)\b/i.test(s)) fx.statusHit ??= status;
     }
   }
   return fx;
@@ -468,20 +470,22 @@ export async function endCombat(items) {
 
 // watches Pretty Sordid and runs the turn hooks once (GM only); state kept in the scene
 // onTurnStart(item): runs after the turn-start rules (prepared actions)
-export function watchTurns(rules, { onTurnStart } = {}) {
-  let busy = false, again = false;
-  const tick = async () => {
-    if (busy) { again = true; return; } // a turn change while busy: run again right after
-    busy = true;
-    try {
-      const items = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null);
-      const active = items.find(isActive);
-      const meta = await OBR.scene.getMetadata();
-      const round = Number(meta["com.pretty-initiative/roundCount"] ?? 1);
-      const prev = meta[TURN_KEY] ?? {};
-      if (!active) return;
-      if (prev.activeId === active.id && prev.round === round) return;
-      await OBR.scene.setMetadata({ [TURN_KEY]: { activeId: active.id, round } });
+// Runs the end/start of turn once for the current Pretty Sordid state. Called by the GM's watcher
+// and right after "Passar turno" by whoever pressed it (so it doesn't depend on the GM's browser).
+// Whoever writes the scene's turn key last does the work; the others back off.
+export async function processTurn(rules, { onTurnStart } = {}) {
+  const items = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null);
+  const active = items.find(isActive);
+  const meta = await OBR.scene.getMetadata();
+  const round = Number(meta["com.pretty-initiative/roundCount"] ?? 1);
+  const prev = meta[TURN_KEY] ?? {};
+  if (!active) return false;
+  if (prev.activeId === active.id && prev.round === round) return false;
+  const claim = `${OBR.player.id}:${Date.now()}:${Math.random()}`;
+  await OBR.scene.setMetadata({ [TURN_KEY]: { activeId: active.id, round, claim } });
+  await new Promise((r) => setTimeout(r, 400));
+  if ((await OBR.scene.getMetadata())[TURN_KEY]?.claim !== claim) return false; // someone else is on it
+  {
       const sheets = await battleItems();
       const byId = new Map(sheets.map((s) => [s.id, s]));
       const log = [];
@@ -499,18 +503,56 @@ export function watchTurns(rules, { onTurnStart } = {}) {
         try { await onTurnStart((await OBR.scene.items.getItems([active.id]))[0]); }
         catch (e) { await pushLog({ kind: "note", attacker: "Combate", text: `Ação preparada de ${active.name} falhou: ${e.message}` }); }
       }
+  }
+  return true;
+}
+
+// what the GM's watchers are doing, kept in the GM's browser for the panel
+export const WATCH_STATUS = `${ID}/watchStatus`;
+export function watchStatus(name, patch) {
+  try {
+    const all = JSON.parse(localStorage.getItem(WATCH_STATUS) || "{}");
+    all[name] = { ...(all[name] ?? {}), ...patch };
+    localStorage.setItem(WATCH_STATUS, JSON.stringify(all));
+  } catch {}
+}
+
+// A watcher loop that can't get stuck: one run at a time, a run that takes too long is dropped,
+// errors are reported to the GM (once a minute) instead of silently stopping it.
+export function guardedLoop(name, run, { delay = 350, timeout = 20000 } = {}) {
+  let busy = false, again = false, timer = null, lastErr = 0;
+  const tick = async () => {
+    timer = null;
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      await Promise.race([run(), new Promise((_, no) => setTimeout(() => no(new Error("demorou demais (mais de 20 s)")), timeout))]);
+      watchStatus(name, { ok: Date.now() });
+    } catch (e) {
+      watchStatus(name, { err: e.message, errAt: Date.now() });
+      console.error(`[PMP ${name}]`, e);
+      if (Date.now() - lastErr > 60000) {
+        lastErr = Date.now();
+        OBR.notification.show(`PMP Fichas (${name}): ${e.message}`, "ERROR").catch(() => {});
+      }
     } finally {
       busy = false;
-      if (again) { again = false; tick(); }
+      if (again) { again = false; schedule(); }
     }
   };
-  // Pretty Sordid (and "Passar turno") change the active token and the round in two separate
-  // updates: wait for both to land, or the turn would start twice
-  let timer = null;
-  const soon = () => { clearTimeout(timer); timer = setTimeout(tick, 350); };
-  OBR.scene.items.onChange(soon);
-  OBR.scene.onMetadataChange(soon);
-  tick();
+  // several updates in a row (active token + round) are handled together, but a stream of changes
+  // can't hold it back forever: it runs `delay` ms after the FIRST change
+  const schedule = () => { if (!timer) timer = setTimeout(tick, delay); };
+  return schedule;
+}
+
+// watches Pretty Sordid and runs the turn hooks once (GM only)
+export function watchTurns(rules, { onTurnStart } = {}) {
+  const schedule = guardedLoop("turnos", () => processTurn(rules, { onTurnStart }));
+  OBR.scene.items.onChange(schedule);
+  OBR.scene.onMetadataChange(schedule);
+  OBR.scene.onReadyChange((ready) => { if (ready) schedule(); });
+  schedule();
 }
 
 // ------------------------------------------------------------------ teams and who sees what
@@ -625,11 +667,8 @@ async function leaveInitiative(token) {
 }
 
 export function watchMarks(rules) {
-  let busy = false, again = false;
   const sync = async () => {
-    if (busy) { again = true; return; }
-    busy = true;
-    try {
+    {
       const all = await OBR.scene.items.getItems();
       const marks = all.filter((i) => i.metadata?.[MARK]);
       const tokens = all.filter((i) => i.metadata?.[SHEET_KEY]);
@@ -656,8 +695,10 @@ export function watchMarks(rules) {
       }
       const haveKeys = new Set(marks.map((m) => m.metadata[MARK].key));
       const wantKeys = new Set(want.map((x) => x.key));
-      const remove = marks.filter((m) => !wantKeys.has(m.metadata[MARK].key)).map((m) => m.id);
-      if (remove.length) await OBR.scene.items.deleteItems(remove);
+      // marks of a deleted token go away with it (they are attached): only delete those still there
+      const live = new Set(all.map((i) => i.id));
+      const remove = marks.filter((m) => !wantKeys.has(m.metadata[MARK].key) && (!m.attachedTo || live.has(m.attachedTo))).map((m) => m.id);
+      if (remove.length) await OBR.scene.items.deleteItems(remove).catch(() => {});
       const { buildShape, buildLabel } = SDK;
       const add = [];
       const common = (b, x) => b.layer("ATTACHMENT").attachedTo(x.for).locked(true).disableHit(true).visible(x.visible).metadata({ [MARK]: { key: x.key } });
@@ -676,11 +717,10 @@ export function watchMarks(rules) {
         }
       }
       if (add.length) await OBR.scene.items.addItems(add);
-    } finally {
-      busy = false;
-      if (again) { again = false; sync(); }
     }
   };
-  OBR.scene.items.onChange(() => sync());
-  sync();
+  const schedule = guardedLoop("marcas", sync, { delay: 150 });
+  OBR.scene.items.onChange(schedule);
+  OBR.scene.onReadyChange((ready) => { if (ready) schedule(); });
+  schedule();
 }
