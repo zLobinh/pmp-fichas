@@ -1,6 +1,6 @@
 // Shared helpers: OBR SDK, data loading, sheet storage on tokens and the combat log.
 import OBR, * as SDK from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { Rules } from "./rules.js?v=0.8.4";
+import { Rules } from "./rules.js?v=0.9.1";
 
 export { OBR, SDK };
 export const ID = "com.pmp-fichas";
@@ -21,7 +21,7 @@ export const STATUSES = {
 };
 
 // set by tools/bump_version.py
-export const VERSION = "0.8.4";
+export const VERSION = "0.9.1";
 
 // absolute URL of a file of this extension (works on a GitHub Pages sub-path), tagged with the
 // version so browsers don't keep serving the previous one from their cache
@@ -45,6 +45,15 @@ export async function getItem(id) {
   return (await OBR.scene.items.getItems([id]))[0] ?? null;
 }
 
+// The app (Lua) exports an empty table as [] — "stages": [], "statuses": [] — and a key written on
+// an array is dropped when the item is saved (that's why stages didn't stick). Fix them to objects.
+export function fixTables(pkmn) {
+  if (!pkmn) return pkmn;
+  pkmn.hp ??= { current: 0, max: 0 };
+  for (const k of ["stages", "statuses", "moves"]) if (!pkmn[k] || Array.isArray(pkmn[k])) pkmn[k] = {};
+  return pkmn;
+}
+
 // mutate a token's sheet; fn receives the Pokémon JSON (the app's format).
 // The drafts are immer proxies (they can't be structuredClone'd), so fn edits the draft in place.
 export async function updatePokemon(id, fn) {
@@ -52,8 +61,7 @@ export async function updatePokemon(id, fn) {
     for (const d of drafts) {
       const sheet = d.metadata[SHEET_KEY];
       if (!sheet) continue;
-      sheet.pkmn.hp ??= { current: 0, max: 0 };
-      sheet.pkmn.moves ??= {};
+      fixTables(sheet.pkmn);
       fn(sheet.pkmn);
       sheet.updated = Date.now();
     }
@@ -66,8 +74,7 @@ export async function updateSheet(id, fn) {
     for (const d of drafts) {
       const sheet = d.metadata[SHEET_KEY];
       if (!sheet) continue;
-      sheet.pkmn.hp ??= { current: 0, max: 0 };
-      sheet.pkmn.moves ??= {};
+      fixTables(sheet.pkmn);
       sheet.battle ??= {};
       fn(sheet, d); // d: the item draft (to move the token in the same update)
       sheet.updated = Date.now();
@@ -101,6 +108,7 @@ export function parseExport(text, rules) {
   const ids = { 1: "Burning", 2: "Frozen", 3: "Paralyzed", 4: "Poisoned", 5: "Asleep", 6: "Confused" };
   const st = {};
   for (const k of Object.keys(pkmn.statuses ?? {})) st[ids[k] ?? k] = true;
+  fixTables(pkmn);
   pkmn.statuses = st;
   return pkmn;
 }

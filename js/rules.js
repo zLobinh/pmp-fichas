@@ -137,6 +137,25 @@ export class Rules {
     return { walk: m(sp.WSp), fly: m(sp.Fsp), swim: m(sp.Ssp), climb: m(sp["Climbing Speed"]), burrow: m(sp["Burrowing Speed"]) };
   }
 
+  // size category: 0 Miúdo, 1 Pequeno, 2 Médio, 3 Grande, 4 Enorme, 5 Imenso
+  sizeRank(pkmn) {
+    const s = (this.speciesData(pkmn)?.size ?? "Médio").toLowerCase();
+    if (/mi[uú]do|tiny/.test(s)) return 0;
+    if (/pequeno|small/.test(s)) return 1;
+    if (/grande|large/.test(s)) return 3;
+    if (/enorme|huge/.test(s)) return 4;
+    if (/imenso|gargantuan/.test(s)) return 5;
+    return 2;
+  }
+  // melee reach (pág. 54): 1,5 m up to Grande, 3 m above that
+  reach(pkmn) { return this.sizeRank(pkmn) >= 4 ? 3 : 1.5; }
+  hasFeat(pkmn, feat) { return this.featCount(pkmn, feat) > 0; }
+  // skill check bonus: attribute mod + proficiency when the species has the skill
+  skillMod(pkmn, skill, attr) {
+    const skills = this.speciesData(pkmn)?.Skill ?? [];
+    return mod(this.attributes(pkmn)[attr]) + (skills.includes(skill) ? this.proficiency(pkmn) : 0);
+  }
+
   // M.get_initiative_modifier (without speed stage, item and ability bonuses)
   initiative(pkmn) {
     return mod(this.attributes(pkmn).DEX) + (this.featCount(pkmn, "Alerta") ? 5 : 0);
@@ -163,7 +182,7 @@ export class Rules {
   moveMaxPP(pkmn, name) {
     const pp = this.moves[name]?.PP ?? 0;
     if (typeof pp === "string") return pp;
-    return pp + this.featCount(pkmn, "IncansÁvel") + (pkmn.moves?.[name]?.pp_up ?? 0) * 2;
+    return pp + this.featCount(pkmn, "Incansável") + (pkmn.moves?.[name]?.pp_up ?? 0) * 2;
   }
 
   movePP(pkmn, name) {
@@ -189,7 +208,7 @@ export class Rules {
       description: move.Description,
       scaling: move.Scaling,
       table: move.Table,
-      rangeInfo: parseRange(move.Range),
+      rangeInfo: this.rangeFor(pkmn, parseRange(move.Range)),
       ppMax: this.moveMaxPP(pkmn, name),
       pp: this.movePP(pkmn, name),
       stab,
@@ -208,6 +227,16 @@ export class Rules {
       out.damageText = formatDamage(out.damage);
     }
     return out;
+  }
+
+  // the Pokémon's own reach for plain melee; "Controlador de Área" doubles areas
+  rangeFor(pkmn, r) {
+    if (r.kind === "melee" && r.label === "corpo a corpo" && this.reach(pkmn) > r.meters) return { ...r, meters: this.reach(pkmn), label: `corpo a corpo (${fmtM(this.reach(pkmn))})` };
+    if (r.kind === "area" && this.hasFeat(pkmn, "Controlador de Área")) {
+      const meters = r.meters * 2;
+      return { ...r, meters, label: r.label.replace(/[\d,]+ m$/, fmtM(meters)) + " (Controlador de Área)" };
+    }
+    return r;
   }
 
   moveList(pkmn) {

@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.4";
-import { d, fmtM } from "./rules.js?v=0.8.4";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.8.4";
-import { pointMeters, altitudeOf, checkRange } from "./map.js?v=0.8.4";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.1";
+import { d, fmtM } from "./rules.js?v=0.9.1";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.9.1";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.1";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -90,13 +90,18 @@ export function movement(rules, item) {
   let base = alt > 0 ? sp.fly : sp.walk || (canFly ? sp.fly : 0);
   let why = "";
   if (INCAPACITATED.some((k) => cond[k])) { base = 0; why = "incapacitado: deslocamento 0"; }
+  else if (cond.Grappled) { base = 0; why = "agarrado: deslocamento 0"; }
+  else if (b.thrown && alt > 0 && !sp.fly) { base = 0; why = "arremessado: no ar até o fim do próximo turno"; }
+  else if (b.move?.stopped) { base = 0; why = "Sentinela: deslocamento 0 neste turno"; }
   else if (cond.Paralyzed || cond.Drowsy) {
     base = Math.floor(base / 2 / 1.5) * 1.5; // half, rounded down to 1,5 m
     why = cond.Paralyzed ? "paralisado: metade do deslocamento" : "sonolento: metade do deslocamento";
   }
   const mv = b.move ?? {};
   const budget = base * (mv.dash ? 2 : 1);
-  const used = r1((mv.used ?? 0) + (mv.standUp ? base / 2 : 0));
+  // standing up costs half (only 1,5 m with "Atleta")
+  const athlete = rules.hasFeat(sheet.pkmn, "Atleta (FOR)") || rules.hasFeat(sheet.pkmn, "Atleta (DES)");
+  const used = r1((mv.used ?? 0) + (mv.standUp ? (athlete ? Math.min(1.5, base) : base / 2) : 0));
   return {
     walk: sp.walk, fly: sp.fly, swim: sp.swim, canFly, alt, base, budget, used,
     left: r1(Math.max(0, budget - used)), dash: !!mv.dash, tracking: inInitiative(item), why,
@@ -108,7 +113,9 @@ export function movement(rules, item) {
 export function jumps(rules, item) {
   const sheet = getSheet(item);
   const str = Math.max(0, mod(rules.attributes(sheet.pkmn).STR));
-  const ran = (sheet.battle?.move?.used ?? 0) >= 3;
+  // the run-up is 3 m (1,5 m with "Atleta")
+  const athlete = rules.hasFeat(sheet.pkmn, "Atleta (FOR)") || rules.hasFeat(sheet.pkmn, "Atleta (DES)");
+  const ran = (sheet.battle?.move?.used ?? 0) >= (athlete ? 1.5 : 3);
   const k = ran ? 1 : 0.5;
   return { high: r1((1 + 0.5 * str) * k), long: r1((2 + str) * k), ran, fullHigh: 1 + 0.5 * str, str };
 }
@@ -249,6 +256,79 @@ export async function approach(rules, attacker, target, move, { maxCost = Infini
   return null;
 }
 
+// ------------------------------------------------------------------ ataques de oportunidade (pág. 54)
+
+// melee damaging "1 ação" moves it can use for an attack of opportunity (Struggle when none)
+export function oaMoves(rules, pkmn) {
+  const list = Object.keys(pkmn.moves ?? {}).filter((n) => {
+    const m = rules.moveData(pkmn, n);
+    const t = moveTiming(rules.moves[n] ?? {});
+    return m.rangeInfo?.kind === "melee" && m.damage && t.action && !(typeof m.pp === "number" && m.pp <= 0);
+  });
+  return list.length ? list : ["Struggle"];
+}
+
+// the reactor's owner gets the choice (battle.oa), shown on its quick sheet
+export async function offerOpportunity(reactor, target, why, { sentinel = false } = {}) {
+  await updateSheet(reactor.id, (s) => {
+    s.battle.oa = { targetId: target.id, targetName: target.name, at: Date.now(), why, sentinel };
+  });
+  await pushLog({ kind: "note", attacker: reactor.name, text: `⚔ pode fazer um ataque de oportunidade em ${target.name} (${why})` });
+}
+
+const canReact = (sheet) => {
+  const c = conditionsOf(sheet);
+  return sheet.pkmn.hp.current > 0 && !INCAPACITATED.some((k) => c[k]) && !c.Confused && econOf(sheet).reaction && !sheet.battle?.charging?.invuln;
+};
+
+// a creature moved from `from` to `to` by itself: who sees it leave their reach?
+export async function checkOpportunity(rules, mover, from, to) {
+  const ms = getSheet(mover);
+  if (!ms) return [];
+  const others = await OBR.scene.items.getItems((i) => i.id !== mover.id && i.metadata?.[SHEET_KEY] && inInitiative(i));
+  const out = [];
+  for (const h of others) {
+    const hs = getSheet(h);
+    if ((hs.team ?? "inimigos") === (ms.team ?? "inimigos") || !canReact(hs)) continue;
+    const reach = rules.reach(hs.pkmn);
+    const was = await distanceMeters(h, { ...mover, position: from });
+    const now = await distanceMeters(h, { ...mover, position: to });
+    if (!(was <= reach + 0.05 && now > reach + 0.05)) continue;
+    const sentinel = rules.hasFeat(hs.pkmn, "Sentinela");
+    if (ms.battle?.move?.disengage && !sentinel) continue; // Desengajar
+    if (rules.hasFeat(ms.pkmn, "Mobilidade") && ms.battle?.move?.meleed?.includes(h.id)) continue;
+    await offerOpportunity(h, mover, "saiu do alcance");
+    out.push(h);
+  }
+  return out;
+}
+
+// "Sentinela": an enemy within 1,5 m attacked someone else (who doesn't have the feat)
+export async function checkSentinel(rules, attacker, targets) {
+  const as = getSheet(attacker);
+  if (!as) return;
+  const others = await OBR.scene.items.getItems((i) => i.id !== attacker.id && i.metadata?.[SHEET_KEY] && inInitiative(i));
+  for (const h of others) {
+    const hs = getSheet(h);
+    if (!rules.hasFeat(hs.pkmn, "Sentinela") || (hs.team ?? "inimigos") === (as.team ?? "inimigos") || !canReact(hs)) continue;
+    if (targets.some((t) => t.id === h.id || rules.hasFeat(getSheet(t)?.pkmn ?? {}, "Sentinela"))) continue;
+    if ((await distanceMeters(h, attacker)) > 1.55) continue;
+    await offerOpportunity(h, attacker, "atacou outro alvo perto do Sentinela", { sentinel: true });
+  }
+}
+
+// "Desengajar" (pág. 49): an action; its movement doesn't provoke attacks of opportunity this turn
+export async function disengage(rules, item) {
+  const running = await ownTurnCheck(item);
+  if (!running) throw new TurnError("Desengajar só conta em combate (Pretty Sordid rodando).");
+  if (!econOf(getSheet(item)).action) throw new TurnError("A ação deste turno já foi usada.", "used");
+  await updateSheet(item.id, (s) => {
+    s.battle.econ = { ...econOf(s), action: false };
+    s.battle.move = { used: 0, pos: { ...item.position }, ...(s.battle.move ?? {}), disengage: true };
+  });
+  await pushLog({ kind: "note", attacker: item.name, text: "usou Desengajar (ação): não provoca ataques de oportunidade neste turno" });
+}
+
 // ------------------------------------------------------------------ the GM's watcher
 
 export const TOAST = `${ID}/toast`;
@@ -269,7 +349,9 @@ export function watchMovement(rules) {
         const alt = altitudeOf(t);
         if (alt > 0) {
           const cond = conditionsOf(s);
-          const why = s.pkmn.hp.current <= 0 ? "desmaiou" : INCAPACITATED.find((k) => cond[k]) ? "não consegue mais voar" : s.battle?.grounded ? "derrubado" : rules.speeds(s.pkmn).fly <= 0 ? "não voa" : null;
+          // (a creature thrown up by an ally stays up until the end of its next turn)
+          const why = s.pkmn.hp.current <= 0 ? "desmaiou" : INCAPACITATED.find((k) => cond[k]) ? "não consegue mais voar"
+            : s.battle?.grounded ? "derrubado" : rules.speeds(s.pkmn).fly <= 0 && !s.battle?.thrown ? "não voa" : null;
           if (why) { await fall(rules, t, why); continue; }
         }
         if (!inInitiative(t)) continue;
@@ -292,6 +374,8 @@ export function watchMovement(rules) {
           await updateSheet(t.id, (sh) => {
             sh.battle.move = { ...(sh.battle.move ?? {}), used: r1((sh.battle.move?.used ?? 0) + dist), pos: { ...t.position } };
           });
+          // leaving an enemy's reach provokes an attack of opportunity
+          await checkOpportunity(rules, t, mv.pos, t.position);
         }
       }
     }

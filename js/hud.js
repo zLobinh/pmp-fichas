@@ -1,15 +1,16 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.8.4";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.8.4";
-import { useMove, TurnError, throwAttack, THROW, throwRange } from "./combat.js?v=0.8.4";
-import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.8.4";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.8.4";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.8.4";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.8.4";
-import { runPrepared } from "./prepared.js?v=0.8.4";
-import { seesTarget } from "./combat.js?v=0.8.4";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude } from "./tactics.js?v=0.8.4";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.1";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.1";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.1";
+const GRAB = "__grab";
+import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.1";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.1";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.1";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.1";
+import { runPrepared } from "./prepared.js?v=0.9.1";
+import { seesTarget } from "./combat.js?v=0.9.1";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.1";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -40,13 +41,36 @@ function pendingMove() {
     const m = throwRange(state.rules, pkmn);
     return { name: THROW, label: "Arremessar", rangeInfo: { kind: "ranged", meters: m, label: fmtM(m) } };
   }
+  if (state.pending === GRAB) {
+    const r = state.rules.reach(pkmn);
+    return { name: GRAB, label: "Agarrar", rangeInfo: { kind: "melee", meters: r, label: `corpo a corpo (${fmtM(r)})` } };
+  }
   return state.rules.moveData(pkmn, state.pending);
+}
+
+// Arremessar with 2 tokens: which one is thrown? (the one picked with ⇄, else an ally / one it grapples)
+function throwRoles() {
+  if (state.pending !== THROW || state.targets.length !== 2) return { creature: null, target: state.targets[0] ?? null };
+  const mine = getSheet(state.item);
+  const fit = (t) => { const s = getSheet(t); return !s || s.pkmn.hp.current <= 0 || allies(mine, s) || s.battle?.cond?.Grappled?.by === state.attackerId; };
+  let creature = state.targets.find((t) => t.id === state.throwCreature) ?? state.targets.find(fit) ?? state.targets[0];
+  return { creature, target: state.targets.find((t) => t.id !== creature.id) };
 }
 
 async function updateRanges() {
   state.ranges = new Map();
   if (!state.pending || !state.targets.length) return;
   const move = pendingMove();
+  if (state.pending === THROW && state.targets.length === 2) {
+    // range counts to the target; the creature has to be within reach
+    const { creature, target } = throwRoles();
+    const [r] = await checkRange(state.item, move, [target]);
+    state.ranges.set(target.id, r);
+    const d = Math.round((await distanceMeters(state.item, creature)) * 10) / 10;
+    const reach = state.rules.reach(getSheet(state.item).pkmn);
+    state.ranges.set(creature.id, { id: creature.id, meters: d, ok: d <= reach + 0.05, reason: d <= reach + 0.05 ? "" : `precisa estar a ${fmtM(reach)}`, role: "creature" });
+    return;
+  }
   const ch = chargingOf(getSheet(state.item));
   // Fly/Dig...: counted from where the move was activated
   const from = ch?.invuln && ch.move === state.pending && ch.from ? { ...state.item, position: ch.from, metadata: {} } : state.item;
@@ -189,18 +213,64 @@ function moveBlock() {
       h("button", { class: "small icon", disabled: state.busy || mv.alt <= 0, title: "Descer 1,5 m (gasta 1,5 m de deslocamento)", onclick: () => act(() => changeAltitude(rules, state.item, -1.5)) }, "▼"),
     ] : null,
     h("span", { class: "spacer" }),
-    mv.alt === 0 ? h("span", { class: "muted", title: `Salto em altura ${fmtM(j.high)}, em distância ${fmtM(j.long)} (${j.ran ? "com corrida de 3 m" : "parado: metade; ande 3 m antes pra saltar o dobro"}). Num Move corpo a corpo contra um voador, o pulo é automático e gasta deslocamento.` }, `🦘 ${fmtM(j.high)}`) : null,
+    mv.alt === 0 ? h("span", { class: "muted", title: `Salto em altura ${fmtM(j.high)}, em distância ${fmtM(j.long)} (${j.ran ? "com corrida" : "parado: metade; ande 3 m antes pra saltar o dobro"}). Num Move corpo a corpo contra um voador, o pulo é automático e gasta deslocamento.` }, `🦘 ${fmtM(j.high)}`) : null);
+}
+
+// actions that aren't moves: throwing, grappling, Desengajar
+function actionsBlock() {
+  const { rules } = state;
+  const sheet = getSheet(state.item);
+  const pkmn = sheet.pkmn;
+  const tracking = inInitiative(state.item) && state.running;
+  const mine = isActive(state.item);
+  const econ = econOf(sheet);
+  const pick = (kind) => async () => {
+    Object.assign(state, { pending: kind, mode: "target", outOfRange: null, turnError: null, helperCands: [], helpers: new Set(), throwCreature: null });
+    const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
+    state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
+    await updateRanges();
+    render();
+  };
+  const grabbed = conditionsOf(sheet).Grappled;
+  return h("div", { class: "row hud-moverow small", style: "gap:4px;margin:2px 0" },
     h("button", {
       class: `small ${state.pending === THROW ? "primary" : ""}`, disabled: state.busy,
-      title: `Arremessar (ação): objeto ou criatura até ${fmtM(throwRange(rules, getSheet(state.item).pkmn))}. d20 + FOR contra a CA, 1d6 + FOR de dano. Acerta voadores.`,
-      onclick: async () => {
-        Object.assign(state, { pending: THROW, mode: "target", outOfRange: null, turnError: null, helperCands: [], helpers: new Set() });
-        const sel = ((await OBR.player.getSelection()) ?? []).filter((id) => id !== state.attackerId);
-        state.targets = sel.length ? await OBR.scene.items.getItems(sel) : [];
-        await updateRanges();
-        render();
-      },
-    }, "🤾 Arremessar"));
+      title: `Arremessar (ação), até ${fmtM(throwRange(rules, pkmn))}. Marque 1 alvo pra jogar um objeto, ou 2 tokens: a criatura (ao seu alcance) e o alvo. Aliado não precisa de teste; inimigo precisa estar agarrado e vai metade da distância. Jogada num voador, a criatura fica no ar até o fim do próximo turno dela.`,
+      onclick: pick(THROW),
+    }, "🤾 Arremessar"),
+    h("button", {
+      class: `small ${state.pending === GRAB ? "primary" : ""}`, disabled: state.busy || !!sheet.battle?.grabbing,
+      title: "Agarrar (ação): FOR (Atletismo) contra FOR (Atletismo) ou DES (Acrobacia) do alvo. Agarrado fica com deslocamento 0.",
+      onclick: pick(GRAB),
+    }, "🤼 Agarrar"),
+    sheet.battle?.grabbing ? h("button", { class: "small", disabled: state.busy, title: "Soltar (ação livre)", onclick: () => act(() => releaseGrapple(state.item)) }, "Soltar") : null,
+    grabbed ? h("button", { class: "small", disabled: state.busy, title: `Escapar de ${grabbed.byName} (ação): FOR (Atletismo) ou DES (Acrobacia) contra FOR (Atletismo)`, onclick: () => act(async () => { state.last = { ...(await escapeGrapple(rules, state.item)), kind: "note" }; }) }, "Escapar") : null,
+    tracking ? h("button", {
+      class: "small", disabled: state.busy || !mine || !econ.action || sheet.battle?.move?.disengage,
+      title: "Desengajar (ação): seu movimento não provoca ataques de oportunidade neste turno",
+      onclick: () => act(() => disengage(rules, state.item)),
+    }, sheet.battle?.move?.disengage ? "🛡 Desengajado" : "🛡 Desengajar") : null);
+}
+
+// an attack of opportunity waiting for this Pokémon's owner to decide
+function oaBlock() {
+  const sheet = getSheet(state.item);
+  const oa = sheet.battle?.oa;
+  if (!oa) return null;
+  const { rules } = state;
+  const clear = () => act(() => updateSheet(state.attackerId, (s) => { delete s.battle.oa; }));
+  const strike = (name) => act(async () => {
+    const [target] = await OBR.scene.items.getItems([oa.targetId]);
+    if (!target) throw new Error("O alvo não está mais no mapa.");
+    state.last = await useMove(rules, state.item, name, [target], { opportunity: true, sentinel: oa.sentinel, ignoreRange: true });
+    state.last._fresh = state.last.roller !== "Dice+";
+  });
+  return h("div", { class: "hud-target oa" },
+    h("div", { class: "small" }, h("b", {}, `⚔ Ataque de oportunidade em ${oa.targetName}`), h("span", { class: "muted" }, ` · ${oa.why}`)),
+    h("div", { class: "small muted" }, `Gasta a reação. ${rules.hasFeat(sheet.pkmn, "Mestre de Combate Corpo a Corpo") ? "Com vantagem (Mestre de Combate Corpo a Corpo). " : ""}${rules.hasFeat(sheet.pkmn, "Sentinela") ? "Sentinela: se acertar, ele para." : ""}`),
+    h("div", { class: "row", style: "gap:4px;flex-wrap:wrap;margin-top:4px" },
+      oaMoves(rules, sheet.pkmn).map((n) => h("button", { class: "small primary", disabled: state.busy, onclick: () => strike(n) }, rules.moveData(sheet.pkmn, n).label.replace(/ PMP$/, ""))),
+      h("button", { class: "small", disabled: state.busy, onclick: clear }, "Ignorar")));
 }
 
 // what's waiting: a prepared action, a charge, an invulnerable phase
@@ -349,26 +419,44 @@ function helpersRow() {
     }, `🤝 ${item.name}${reason ? ` (${reason})` : ""}`)));
 }
 
+// "Mestre de Combate Corpo a Corpo / à Distância": optional −5 on the roll for +10 damage
+function powerToggle(move) {
+  if (!move?.damage || state.pending === THROW || state.pending === GRAB) return null;
+  const pkmn = getSheet(state.item).pkmn;
+  const feat = move.rangeInfo.kind === "melee" ? "Mestre de Combate Corpo a Corpo" : "Mestre de Combate à Distância";
+  if (!state.rules.hasFeat(pkmn, feat)) return null;
+  return h("label", { class: "row small", style: "gap:4px", title: feat },
+    h("input", { type: "checkbox", checked: !!state.power, onchange: (e) => { state.power = e.target.checked; } }),
+    move.attackBonus != null ? "−5 no acerto, +10 de dano" : "−5 na CD, +10 de dano se falhar");
+}
+
 function targetBar() {
   if (state.mode !== "target") return null;
   const move = pendingMove();
   const cancel = () => { Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null }); render(); };
   return h("div", { class: "hud-target" },
     h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), ` · alcance ${move.rangeInfo.label}`),
-    h("div", { class: "small muted" }, "Clique nos alvos no mapa (Shift+clique pra vários)."),
+    h("div", { class: "small muted" }, state.pending === THROW
+      ? "1 alvo = arremessa um objeto. 2 tokens (Shift+clique) = a criatura arremessada (🫴) e o alvo (🎯)."
+      : "Clique nos alvos no mapa (Shift+clique pra vários)."),
     h("div", { class: "targets", style: "margin:4px 0" },
       state.targets.length
         ? state.targets.map((t) => {
             const p = getSheet(t)?.pkmn;
             const r = state.ranges.get(t.id);
+            const role = state.pending === THROW && state.targets.length === 2 ? (throwRoles().creature?.id === t.id ? "🫴 " : "🎯 ") : "";
             return h("span", { class: `chip on ${r && !r.ok ? "far" : ""}`, title: r?.reason ?? "" },
-              t.name || "Token",
+              role, t.name || "Token",
               p && canSeeFull(getSheet(t), state.viewer) ? ` · CA ${state.rules.ac(p)}` : "",
               r?.invuln ? " · 🌀 invulnerável" : r?.meters != null ? ` · ${fmtM(r.meters)}` : "",
               r?.jump ? ` · 🦘 pula ${fmtM(r.jump)}` : "",
               r ? (r.ok ? " ✓" : " ✗") : "");
           })
         : h("span", { class: "muted small" }, "Nenhum alvo: rola só o dano.")),
+    state.pending === THROW && state.targets.length === 2
+      ? h("button", { class: "small", onclick: async () => { state.throwCreature = throwRoles().target.id; await updateRanges(); render(); } }, "⇄ trocar quem é arremessado")
+      : null,
+    powerToggle(move),
     helpersRow(),
     state.outOfRange
       ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.outOfRange.message)
@@ -377,7 +465,7 @@ function targetBar() {
       ? h("div", { class: "no small", style: "margin-bottom:4px" }, state.turnError)
       : null,
     h("div", { class: "row" },
-      state.turnCode === "offturn" && state.pending !== THROW
+      state.turnCode === "offturn" && state.pending !== THROW && state.pending !== GRAB
         ? h("button", { class: "primary", disabled: state.busy, title: "Fica travado neste Move: no início do turno ele anda até o alcance e usa sozinho", onclick: () => prepare() }, "⏳ Preparar")
         : null,
       state.turnError && state.isGM
@@ -402,6 +490,7 @@ function resultBlock() {
 function buildResult(e) {
   const animate = e._fresh === true;
   e._fresh = false;
+  if (e.kind === "note") return h("div", { class: "hud-result small" }, e.text);
   if (e.kind === "check") {
     return h("div", { class: "hud-result row" },
       die(e.nat, { animate, kind: e.nat === 20 ? "crit" : e.nat === 1 ? "fumble" : "" }),
@@ -464,9 +553,15 @@ async function roll(ignoreRange, area = false, force = false) {
   try {
     state.item = await getItem(state.attackerId);
     const helpers = state.helperCands?.filter((c) => state.helpers?.has(c.item.id)).map((c) => c.item) ?? [];
-    state.last = state.pending === THROW
-      ? await throwAttack(state.rules, state.item, state.targets[0], { ignoreRange, force })
-      : await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers });
+    if (state.pending === THROW) {
+      const { creature, target } = throwRoles();
+      state.last = await throwAttack(state.rules, state.item, target, { ignoreRange, force, creature });
+    } else if (state.pending === GRAB) {
+      if (!state.targets[0]) throw new Error("Escolha no mapa quem agarrar.");
+      state.last = await grapple(state.rules, state.item, state.targets[0], { ignoreRange, force });
+    } else {
+      state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers, power: !!state.power });
+    }
     state.last._fresh = state.last.roller !== "Dice+";
     Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, turnCode: null, helperCands: [], helpers: new Set() });
     await OBR.player.select([state.attackerId], true); // back to the attacker
@@ -477,7 +572,7 @@ async function roll(ignoreRange, area = false, force = false) {
       // the GM may prepare it or force it
       state.turnError = e.message;
       state.turnCode = e.code;
-      if (e.code === "offturn" && !area && state.pending !== THROW && !state.isGM) { await prepare(); return; }
+      if (e.code === "offturn" && !area && state.pending !== THROW && state.pending !== GRAB && !state.isGM) { await prepare(); return; }
       if (state.mode !== "target") { OBR.notification.show(e.message, "WARNING"); if (!state.isGM) Object.assign(state, { mode: "idle", pending: null }); else state.mode = "target"; }
     } else {
       OBR.notification.show(e.message, "ERROR");
@@ -534,7 +629,9 @@ function render() {
       h("button", { class: "icon", title: "Fechar", onclick: close }, "✕")),
     hpBlock(pkmn),
     initiativeBlock(pkmn),
+    oaBlock(),
     moveBlock(),
+    actionsBlock(),
     waitingBlock(),
     targetBar(),
     aimBar(),

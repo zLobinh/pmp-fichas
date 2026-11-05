@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.4";
-import { d } from "./rules.js?v=0.8.4";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.1";
+import { d } from "./rules.js?v=0.9.1";
 
 // ------------------------------------------------------------------ conditions
 
@@ -24,6 +24,8 @@ export const CONDITIONS = {
   Stunned: { label: "Atordoado", icon: "💫", nonVolatile: false, immune: [] },
   Confused: { label: "Confuso", icon: "😵‍💫", nonVolatile: false, immune: [], app: "Confused" },
   Infatuated: { label: "Encantado", icon: "💘", nonVolatile: false, immune: [] },
+  // Agarrão (pág. 54): deslocamento 0; { by: id of who holds it }
+  Grappled: { label: "Agarrado", icon: "🤼", nonVolatile: false, immune: [] },
 };
 
 // conditions that leave the Pokémon incapacitated and "impedido" (attacks against it have advantage)
@@ -83,9 +85,11 @@ export function clearCondition(sheet, key, { grace = true } = {}) {
   sheet.battle.cond ??= {};
   if (!sheet.battle.cond[key] && !sheet.pkmn.statuses?.[key]) return false;
   delete sheet.battle.cond[key];
-  if (grace) {
+  if (grace && key !== "Grappled") {
     sheet.battle.grace ??= {};
-    sheet.battle.grace[key] = (sheet.battle.turns ?? 0) + 1;
+    // "Corpo Apto": the grace period lasts 3 more rounds
+    const fit = (sheet.pkmn.feats ?? []).includes("Corpo Apto") ? 3 : 0;
+    sheet.battle.grace[key] = (sheet.battle.turns ?? 0) + 1 + fit;
   }
   if (key === "Asleep") delete sheet.battle.cond.Drowsy; // waking up also cures Sonolento
   syncAppStatuses(sheet);
@@ -103,7 +107,8 @@ export const STAGE_SHORT = { Attack: "Atq", SpecialAttack: "AtE", Defense: "Def"
 export const stage = (pkmn, key) => pkmn?.stages?.[key] ?? 0;
 export function addStage(pkmn, key, delta) {
   const [min, max] = key === "CritMargin" ? [0, 6] : [-6, 6]; // Margem de Crítico can't go down
-  pkmn.stages ??= {};
+  // the app exports an empty table as [] — a key written on an array is lost when saved
+  if (!pkmn.stages || Array.isArray(pkmn.stages)) pkmn.stages = {};
   const v = Math.max(min, Math.min(max, stage(pkmn, key) + delta));
   if (v === 0) delete pkmn.stages[key]; else pkmn.stages[key] = v;
   return v;
@@ -131,40 +136,79 @@ const statsInText = (seg) => {
   return stats;
 };
 const UP = /^(aument|eleva|ganh)/i;
+const NUM = "(\\d+|um|uma|dois|duas|tr[eê]s)";
+const num = (w) => ({ um: 1, uma: 1, dois: 2, duas: 2, tres: 3, "três": 3 })[w.toLowerCase()] ?? Number(w);
+
+// the rulebook text has broken words ("re duzindo", "reduzid a", "Ataque E special", "1 7"): glue them back
+const tidy = (s) => s
+  .replace(/r\s?e\s?duz/gi, "reduz").replace(/au\s?ment/gi, "aument").replace(/dimi\s?nu/gi, "diminu")
+  .replace(/reduzid a\b/gi, "reduzida").replace(/E special/g, "Especial")
+  .replace(/natural de (\d) (\d)\b/gi, "natural de $1$2");
 
 function stagesIn(sentence) {
   const out = [];
-  // the rulebook text has broken words ("re duzindo"): glue the common ones back
-  const s = sentence.replace(/r\s?e\s?duz/gi, "reduz").replace(/au\s?ment/gi, "aument").replace(/dimi\s?nu/gi, "diminu");
-  // "aumentando seu Ataque e Defesa em 1 estágio", "reduzindo a Defesa em 2 estágios"
-  const verbFirst = /(aument\w*|eleva\w*|ganha\w*|reduz\w*|diminu\w*|abaix\w*|perde\w*)([^.]*?)em (\d+) est[aá]gios?/gi;
+  const s = tidy(sentence);
+  // "aumentando seu Ataque e Defesa em 1 estágio", "elevando o Ataque dele em dois estágios"
+  const verbFirst = new RegExp(`(aument\\w*|eleva\\w*|ganha\\w*|reduz\\w*|diminu\\w*|abaix\\w*|perde\\w*)([^.]*?)(?:em )?${NUM} est[aá]gios?`, "gi");
   let m;
   while ((m = verbFirst.exec(s))) {
-    for (const key of statsInText(m[2])) out.push({ stat: key, delta: (UP.test(m[1]) ? 1 : -1) * Number(m[3]) });
+    for (const key of statsInText(m[2])) out.push({ stat: key, delta: (UP.test(m[1]) ? 1 : -1) * num(m[3]) });
   }
   if (out.length) return out;
-  // "tem seu Ataque reduzido em 2 estágios", "a Defesa do alvo é reduzida em 2 estágios"
-  const statFirst = /([A-ZÁÉÍÓÚ][^.]*?)\b(reduzid\w*|aumentad\w*|diminu[ií]d\w*|elevad\w*|abaixad\w*) em (\d+) est[aá]gios?/g;
+  // "Sua Defesa aumenta em 2 estágios", "a Defesa do alvo é reduzida em 2 estágios",
+  // "sua Velocidade aumenta 1 estágio e sua Defesa diminui 1 estágio"
+  const statFirst = new RegExp(`([A-ZÁÉÍÓÚ][^.]*?)\\b(aumenta\\w*|reduz\\w*|diminu\\w*|elevad\\w*|abaixad\\w*)\\s+(?:em\\s+)?${NUM}\\s+est[aá]gios?`, "g");
   while ((m = statFirst.exec(s))) {
-    for (const key of statsInText(m[1])) out.push({ stat: key, delta: (/^(aument|elevad)/i.test(m[2]) ? 1 : -1) * Number(m[3]) });
+    for (const key of statsInText(m[1])) out.push({ stat: key, delta: (/^(aument|elevad)/i.test(m[2]) ? 1 : -1) * num(m[3]) });
   }
   return out;
 }
 
 function statusIn(sentence) {
-  // "fica Queimado", "o alvo fica Paralisado", "é envenenada", "ficando paralisado" (no \b: it fails next to accents)
-  if (!/(^|\s)(fica|ficar|ficará|ficando|fique|fiquem|ficam|torna|é|será|cai no sono|dorme|adormec)/i.test(sentence)) return null;
+  // "fica Queimado", "é envenenada", "ficando paralisado", "recebe o status Atordoado",
+  // "deixando o alvo queimado" (no \b: it fails next to accents)
+  if (!/(^|\s)(fica|ficar|ficará|ficando|fique|fiquem|ficam|torna|é|será|cai no sono|dorme|adormec|recebe|deixa\w*)/i.test(sentence)) return null;
   for (const [re, key] of STATUS_WORDS) if (re.test(sentence)) return key;
   return null;
 }
 
+// "1-2: Envenenado / 3-4: Paralisado / 5-6: Sonolento" -> status for each d6 face
+function statusTable(sentence) {
+  const m = /1-2:\s*([^/\d]+?)\s*\/\s*3-4:\s*([^/\d]+?)\s*\/\s*5-6:\s*([^/.\d]+)/i.exec(sentence);
+  if (!m) return null;
+  const pick = (w) => STATUS_WORDS.find(([re]) => re.test(w))?.[1] ?? null;
+  const [a, b, c] = [pick(m[1]), pick(m[2]), pick(m[3])];
+  return a && b && c ? [a, a, b, b, c, c] : null;
+}
+
+// moves whose effect isn't a stage/condition sentence (handled in combat.js)
+const SPECIAL_FX = {
+  "Belly Drum": { self: [{ stat: "Attack", delta: 12 }], hpCost: 0.5 },
+  "Stored Power": { dicePerOwnBoost: true },
+  "Power Trip": { dicePerOwnBoost: true },
+  Punishment: { dicePerTargetBoost: 7 },
+  "Psych Up": { copyStages: true },
+  "Syrup Bomb": { syrup: 3 },
+  Rest: { rest: true },
+  Refresh: { refresh: true },
+  "Sparkling Aria": { cureBurn: true },
+};
+
 // { self: [stages], target: { onHit|onFail|direct: [...] }, contest, natural }
 export function moveEffects(move) {
-  const desc = (move.Description ?? "").replace(/\s+/g, " ");
+  const desc = tidy((move.Description ?? "").replace(/\s+/g, " "));
   const sentences = desc.split(/(?<=[.!?])\s+/);
   const pessoal = /^pessoal/i.test((move.Range ?? "").trim());
   const area = /cone|linha|raio|semic/i.test(move.Range ?? "");
   const fx = { self: [], fail: [], direct: [], natural: null, contest: null, statusFail: null, statusDirect: null, statusHit: null };
+  const name = (move.Name ?? "").replace(/ \(.*$/, "").replace(/ PMP$/, "");
+  const special = SPECIAL_FX[name];
+  if (special) {
+    Object.assign(fx, special, { self: [...(special.self ?? [])] });
+    if (special.self) return fx; // Belly Drum: the text's "ao máximo (6 estágios)" is already this
+  }
+  // "Caso você esteja congelado, Burn Up irá derreter o gelo": usable while frozen, thaws the user
+  if (/(caso|se) voc[eê] (esteja|estiver) congelad/i.test(desc)) fx.thawSelf = true;
   for (let i = 0; i < sentences.length; i++) {
     const s = sentences[i];
     const contest = s.match(/Role 1d20 \+ MOVE \+ (\d+) e compare o resultado com 10 \+ (FOR|DES|CON|INT|SAB|CAR)/i);
@@ -177,15 +221,23 @@ export function moveEffects(move) {
       if (/resultado maior ou igual|em caso de sucesso/i.test(next)) i++; // already read
       continue;
     }
-    const nat = s.match(/resultado natural de (\d+)/i);
+    const selfish = /\b(seu|sua|seus|suas|voc[eê])\b[^.]*est[aá]gio/i.test(s) && !/\bdo alvo\b|\bda criatura\b|\bo alvo\b/i.test(s);
+    // "Em um resultado natural de 15 ou mais no acerto...", "Em uma rolagem natural de ataque de 7 ou mais,
+    // mesmo que o golpe erre, seu Ataque Especial aumenta..." (Metal Claw/Ancient Power raise the user's)
+    const nat = s.match(/(?:resultado|rolagem) natural(?: de ataque)? de (\d+)/i);
     if (nat) {
-      fx.natural = { min: Number(nat[1]), status: statusIn(s), stages: stagesIn(s) };
+      const next = sentences[i + 1] ?? "";
+      const table = statusTable(s) ?? statusTable(next);
+      fx.natural = {
+        min: Number(nat[1]), status: table ? null : statusIn(s), table, stages: stagesIn(s),
+        self: selfish, evenMiss: /mesmo que (o golpe )?err/i.test(s),
+      };
+      if (table && !statusTable(s)) i++;
       continue;
     }
     const stages = stagesIn(s);
     const status = statusIn(s);
-    const onFail = /falha|falhar/i.test(s) && move.Save;
-    const selfish = /\b(seu|sua|seus|suas|voc[eê])\b[^.]*est[aá]gio/i.test(s) && !/\bdo alvo\b|\bda criatura\b|\bo alvo\b/i.test(s);
+    const onFail = /falha|falhar|fracasso/i.test(s) && move.Save;
     for (const st of stages) {
       if (onFail) fx.fail.push(st);
       else if ((pessoal && !area) || selfish) fx.self.push(st);
@@ -195,7 +247,8 @@ export function moveEffects(move) {
       if (onFail) fx.statusFail ??= status;
       else if (!move.Damage && !move.atk && !(pessoal && !area)) fx.statusDirect ??= status;
       // attack moves: "...e fazendo com que o alvo fique atordoado em um acerto" (Fake Out)
-      else if (move.atk && !move.Save && /\bacerto\b/i.test(s) && !/\bse\b[^,.]*\b(estiver|for)\b/i.test(s)) fx.statusHit ??= status;
+      // ("Caso acerte, o alvo fica Atordoado" — Upper Hand; "no acerto, e deixando o alvo queimado" — Inferno)
+      else if (move.atk && !move.Save && /\bacert/i.test(s) && !/\bse\b[^,.]*\b(estiver|for)\b/i.test(s)) fx.statusHit ??= status;
     }
   }
   return fx;
@@ -279,10 +332,10 @@ export function spend(sheet, cost) {
 
 // returns { canAct, checks: [{ label, nat, failed }], reason, selfDamage, keepsAction }
 // rolls go through the given roller in one throw
-export async function statusGate(rules, item, roller) {
+export async function statusGate(rules, item, roller, { thawSelf = false } = {}) {
   const sheet = getSheet(item);
   const cond = conditionsOf(sheet);
-  if (cond.Frozen) return { canAct: false, reason: "Congelado: não pode agir." };
+  if (cond.Frozen && !thawSelf) return { canAct: false, reason: "Congelado: não pode agir." };
   if (cond.Asleep) return { canAct: false, reason: "Dormindo: não pode agir." };
   if (cond.Stunned) return { canAct: false, reason: "Atordoado: não pode agir." };
   if (sheet.battle?.paraLock) return { canAct: false, reason: "Paralisado: travou até o próximo turno." };
@@ -321,9 +374,12 @@ export async function statusGate(rules, item, roller) {
 // ------------------------------------------------------------------ roll modifiers from conditions/stages
 
 // attack roll against target: advantage if the target is incapacitated/impedido
-export function attackAdvantage(attackerSheet, targetSheet) {
+export function attackAdvantage(attackerSheet, targetSheet, attackerId = null) {
   const t = conditionsOf(targetSheet);
-  return INCAPACITATING.some((k) => t[k]) ? 1 : 0;
+  if (INCAPACITATING.some((k) => t[k])) return 1;
+  // "Disputador": advantage against the creature it is grappling
+  if (attackerId && t.Grappled?.by === attackerId && (attackerSheet?.pkmn?.feats ?? []).includes("Disputador")) return 1;
+  return 0;
 }
 
 // saving throw of the target: -1 = disadvantage
@@ -359,6 +415,8 @@ export async function endTurn(rules, item) {
       notes.push(b.charging.invuln ? `🌀 ${b.charging.move}: reapareceu sem atacar` : `⚡ ${b.charging.move}: a carga se perdeu`);
       delete b.charging;
     }
+    // thrown up by an ally: it comes down at the end of its next turn (the watcher makes it fall)
+    if (b.thrown && (b.turns ?? 0) >= (b.thrown.readyAt ?? 0)) { delete b.thrown; notes.push("🤾 o arremesso acabou: vai cair"); }
     b.turns = (b.turns ?? 0) + 1;
     const cond = conditionsOf(sheet);
     b.cond = cond;
@@ -386,6 +444,12 @@ export async function endTurn(rules, item) {
       if (cond.Confused.left <= 0) { clearCondition(sheet, "Confused"); notes.push("😵‍💫 Não está mais confuso"); }
     }
     if (cond.Stunned?.untilEnd) { clearCondition(sheet, "Stunned"); notes.push("💫 Não está mais atordoado"); }
+    if (b.syrup > 0) { // Syrup Bomb
+      addStage(sheet.pkmn, "Speed", -1);
+      b.syrup -= 1;
+      notes.push(`🍯 xarope: Velocidade −1${b.syrup ? ` (mais ${b.syrup})` : ""}`);
+      if (!b.syrup) delete b.syrup;
+    }
     // "Período de Carência" lasts until the end of its next turn
     for (const [k, until] of Object.entries(b.grace ?? {})) if (b.turns > until) delete b.grace[k];
     syncAppStatuses(sheet);
@@ -489,6 +553,8 @@ export async function processTurn(rules, { onTurnStart } = {}) {
       const sheets = await battleItems();
       const byId = new Map(sheets.map((s) => [s.id, s]));
       const log = [];
+      // an attack of opportunity not taken is gone once the turn changes
+      for (const it of sheets) if (getSheet(it)?.battle?.oa) await updateSheet(it.id, (s) => { delete s.battle.oa; });
       if (prev.activeId && prev.activeId !== active.id && byId.has(prev.activeId)) {
         const notes = await endTurn(rules, byId.get(prev.activeId));
         if (notes.length) log.push(`Fim do turno de ${byId.get(prev.activeId).name}: ${notes.join("; ")}`);

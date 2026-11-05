@@ -1,13 +1,13 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.8.4";
-import { describe } from "./combat.js?v=0.8.4";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.8.4";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.8.4";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.8.4";
-import { watchTurns, watchMarks } from "./battle.js?v=0.8.4";
-import { watchMovement, TOAST } from "./tactics.js?v=0.8.4";
-import { runPrepared } from "./prepared.js?v=0.8.4";
-import { loadRules } from "./store.js?v=0.8.4";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.1";
+import { describe } from "./combat.js?v=0.9.1";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.1";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.1";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.1";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.1";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.1";
+import { runPrepared } from "./prepared.js?v=0.9.1";
+import { loadRules } from "./store.js?v=0.9.1";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -100,6 +100,26 @@ OBR.onReady(() => {
     if (await OBR.scene.isReady()) start();
     else {
       const off = OBR.scene.onReadyChange((ready) => { if (ready) { off(); start(); } });
+    }
+  });
+
+  // an attack of opportunity offered to one of MY Pokémon: warn and open its quick sheet
+  // (the GM answers for Pokémon whose owner is not a player in the room)
+  const seenOa = new Map();
+  OBR.scene.items.onChange(async (items) => {
+    for (const it of items) {
+      const s = getSheet(it);
+      const oa = s?.battle?.oa;
+      if (!oa || seenOa.get(it.id) === oa.at) continue;
+      seenOa.set(it.id, oa.at);
+      if (Date.now() - oa.at > 15000) continue;
+      const players = await OBR.party.getPlayers().catch(() => []);
+      const ownerHere = players.some((p) => p.id === s.owner);
+      const mine = s.owner === viewer.id || (viewer.role === "GM" && !ownerHere);
+      if (!mine) continue;
+      OBR.notification.show(`⚔ ${it.name} pode fazer um ataque de oportunidade em ${oa.targetName}`, "WARNING");
+      markHudAlive();
+      openHud(it.id);
     }
   });
 

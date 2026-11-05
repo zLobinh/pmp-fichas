@@ -1,8 +1,8 @@
 // "Mudanças de Status" popup, like the app's screen: the 8 stages (Livro de Regras pág. 73) and the
 // Amplification/Reduction damage points (pág. 57-58). Everything here feeds the combat math.
-import { OBR, ID, loadRules, getSheet, getItem, updateSheet, canEdit, h, syncTheme } from "./store.js?v=0.8.4";
-import { STAGES, stage, addStage, ampPoints, redPoints, setPoints, pointsText } from "./battle.js?v=0.8.4";
-import { STAGES_ID } from "./ui.js?v=0.8.4";
+import { OBR, ID, loadRules, getSheet, getItem, updateSheet, canEdit, h, syncTheme } from "./store.js?v=0.9.1";
+import { STAGES, stage, addStage, ampPoints, redPoints, setPoints, pointsText } from "./battle.js?v=0.9.1";
+import { STAGES_ID } from "./ui.js?v=0.9.1";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const root = document.getElementById("root");
@@ -35,6 +35,9 @@ function render() {
   const change = (k, d) => updateSheet(itemId, (s) => addStage(s.pkmn, k, d));
   const points = (key, d) => updateSheet(itemId, (s) => setPoints(s.pkmn, key, (s.pkmn[key] ?? 0) + d));
   const amp = ampPoints(pkmn), red = redPoints(pkmn);
+  // received damage points: battle-only (not in the app's export)
+  const ampIn = sheet.battle?.ampIn ?? 0, redIn = sheet.battle?.redIn ?? 0;
+  const inPoints = (key, d) => updateSheet(itemId, (s) => setPoints(s.battle, key, (s.battle[key] ?? 0) + d));
   const row = (label, value, cls, onMinus, onPlus, text) =>
     h("div", { class: "stage-row" },
       h("span", { class: "stage-name" }, label),
@@ -53,13 +56,17 @@ function render() {
         `Bônus de proficiência ${prof}. Crítico ignora estágios negativos de quem ataca e positivos de quem defende. Margem de Crítico não fica negativa.`)),
     h("div", { class: "card" },
       h("h2", {}, "Pontos de dano (passos de 0,5)"),
+      h("div", { class: "small", style: "margin:2px 0" }, h("b", {}, "Dano que ele causa")),
       row("Amplificação", m(amp), amp ? "ok" : "", () => points("damage_amp", -0.5), () => points("damage_amp", 0.5), pointsText(amp, 0) || "sem efeito"),
       row("Redução", m(red), red ? "no" : "", () => points("damage_red", -0.5), () => points("damage_red", 0.5), pointsText(0, red) || "sem efeito"),
+      h("div", { class: "small", style: "margin:6px 0 2px" }, h("b", {}, "Dano que ele recebe")),
+      row("Amplificação", m(ampIn), ampIn ? "no" : "", () => inPoints("ampIn", -0.5), () => inPoints("ampIn", 0.5), pointsText(ampIn, 0) || "sem efeito"),
+      row("Redução", m(redIn), redIn ? "ok" : "", () => inPoints("redIn", -0.5), () => inPoints("redIn", 0.5), pointsText(0, redIn) || "sem efeito"),
       h("div", { class: "muted small", style: "margin-top:6px" },
-        "Valem pro dano dos Moves deste Pokémon. 0,5 = ½ prof.; 1 = rola 2x; 2 = +1 dado a cada 2; 2 de Redução = dano pela metade. Helping Hand soma 2 (ou 1 com um dado só).")),
+        "Os pontos de quem ataca e os de quem recebe se somam no mesmo golpe (pág. 57). Ex.: Reflect = Redução no dano recebido. 0,5 = ½ prof.; 1 = rola 2x; 2 = +1 dado a cada 2 (Amplificação) ou dano pela metade (Redução). Os de dano recebido valem só nesta batalha.")),
     state.editable
       ? h("div", { class: "row" }, h("span", { class: "spacer" }),
-          h("button", { onclick: () => updateSheet(itemId, (s) => { s.pkmn.stages = {}; delete s.pkmn.damage_amp; delete s.pkmn.damage_red; }) }, "Zerar tudo"))
+          h("button", { onclick: () => updateSheet(itemId, (s) => { s.pkmn.stages = {}; delete s.pkmn.damage_amp; delete s.pkmn.damage_red; delete s.battle.ampIn; delete s.battle.redIn; }) }, "Zerar tudo"))
       : h("div", { class: "muted small" }, "Só leitura."));
 }
 

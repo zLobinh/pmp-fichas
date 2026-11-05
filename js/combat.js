@@ -4,25 +4,28 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.8.4";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.8.4";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.8.4";
-import { getRoller } from "./dice.js?v=0.8.4";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.1";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.1";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.1";
+import { getRoller } from "./dice.js?v=0.9.1";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
-  statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, PRETTY, TurnError,
+  statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.8.4";
+} from "./battle.js?v=0.9.1";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
-  fall, approach, moveToken,
-} from "./tactics.js?v=0.8.4";
+  fall, approach, moveToken, checkSentinel, jumps,
+} from "./tactics.js?v=0.9.1";
 
 export { TurnError };
 
 const effLabel = (m) => (m === 0 ? "imune" : m >= 4 ? "super efetivo ×4" : m >= 2 ? "super efetivo ×2" : m <= 0.25 ? "pouco efetivo ×¼" : m < 1 ? "pouco efetivo ×½" : "");
 const mod = (v) => Math.floor((v - 10) / 2);
 const stageText = (list) => list.map((s) => `${STAGES[s.stat]} ${s.delta > 0 ? "+" : ""}${s.delta}`).join(", ");
+
+// Helping Hand's die: "d8 no nível 5, d10 no nível 10 e d12 no nível 17"
+export const helpDie = (rules, pkmn) => { const l = rules.level(pkmn); return l >= 17 ? 12 : l >= 10 ? 10 : l >= 5 ? 8 : 6; };
 
 // applies damage to a Pokémon JSON: temp HP first, never below 0
 function takeDamage(pkmn, amount) {
@@ -66,7 +69,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (round !== 1) throw new TurnError("Fake Out só pode ser usado na 1ª rodada do combate.", "round");
   }
 
-  if (!releasing && typeof move.pp === "number" && move.pp <= 0) throw new Error(`${move.label} está sem PP.`);
+  // (Struggle is the last resort of an attack of opportunity: no PP)
+  if (!releasing && moveName !== "Struggle" && typeof move.pp === "number" && move.pp <= 0) throw new Error(`${move.label} está sem PP.`);
 
   // invulnerable targets (Fly, Dig...): only the right moves reach them
   const blocked = [];
@@ -77,6 +81,16 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     }
     if (blocked.length && !opts.area) throw new Error(blocked.map((b) => `${b.t.name} está ${b.reason}: não pode ser alvo`).join("; ") + ".");
     if (blocked.length) targetItems = targetItems.filter((t) => !blocked.some((b) => b.t.id === t.id));
+    // "Escultor de Poder": in its area moves, 1 + MOVE allies are left out
+    if (opts.area && rules.hasFeat(attacker, "Escultor de Poder")) {
+      let spare = 1 + Math.max(0, rules.movePower(attacker, raw, false) ?? 0);
+      const kept = [];
+      for (const t of targetItems) {
+        if (spare > 0 && t.id !== attackerItem.id && getSheet(t) && allies(aSheet, getSheet(t))) { spare--; entry.notes.push(`${t.name} poupado (Escultor de Poder)`); }
+        else kept.push(t);
+      }
+      targetItems = kept;
+    }
   }
 
   let jumped = 0;
@@ -100,6 +114,17 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (running && !opts.force && !isActive(attackerItem)) throw new TurnError("Focus Punch só sai no turno deste Pokémon.");
     cost = null;
     entry.cost = "ação livre";
+  } else if (opts.opportunity && tracked && !opts.force) {
+    // ataque de oportunidade (pág. 54): the reaction, with a melee "1 ação" move; it doesn't take the next action
+    if (!econOf(aSheet).reaction) throw new TurnError("A reação já foi usada.");
+    if (conditionsOf(aSheet).Confused) throw new TurnError("Confuso: não pode usar reações.");
+    cost = { spend: ["reaction"], label: "reação (ataque de oportunidade)", reaction: true };
+    entry.cost = cost.label;
+  } else if (melee && tracked && !opts.force && isActive(attackerItem) && rules.hasFeat(attacker, "Investida Poderosa")
+      && aSheet.battle?.move?.dash && !econOf(aSheet).action && econOf(aSheet).bonus) {
+    // "Investida Poderosa": after Disparada the bonus action can attack in melee
+    cost = { spend: ["bonus"], label: "ação bônus (Investida Poderosa)", powerCharge: true };
+    entry.cost = cost.label;
   } else {
     cost = opts.force ? null : chooseCost(attackerItem, raw, running);
     if (cost && sp?.kind === "recharge") { cost.recharge = true; cost.label += ", recarga no próximo turno"; }
@@ -111,7 +136,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const moveName_ = move.label.replace(/ PMP$/, "");
 
   // conditions that can stop the attacker (paralysis d4, confusion d6, charm d4...)
-  const gate = await statusGate(rules, attackerItem, roller);
+  if (fx.hpCost) { // Belly Drum fails below half HP or with Ataque already at +6
+    if (attacker.hp.current < rules.maxHP(attacker) / 2) throw new Error(`${move.label} falha: precisa de pelo menos metade do HP.`);
+    if (stage(attacker, "Attack") >= 6) throw new Error(`${move.label} falha: o Ataque já está no máximo.`);
+  }
+  const gate = await statusGate(rules, attackerItem, roller, { thawSelf: fx.thawSelf });
   if (gate.checks?.length) entry.checks = gate.checks;
   if (!gate.canAct) {
     await updateSheet(attackerItem.id, (s) => {
@@ -162,20 +191,27 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       spend(s, cost);
     });
     const round = Number((await OBR.scene.getMetadata())["com.pretty-initiative/roundCount"] ?? 0);
+    // the help die is rolled now (d6, d8 at level 5, d10 at 10, d12 at 17) and waits on the ally
+    const sides = helpDie(rules, attacker);
+    const rolled = await roller.batch(allyTargets.map(() => ({ amount: 1, sides, bonus: 0 })), `${who} Helping Hand`);
+    allyTargets.forEach((t, i) => { t._die = rolled[i].dice[0]; });
     for (const t of allyTargets) {
-      await updateSheet(t.id, (s) => { s.battle.helped = { by: who, round }; });
-      entry.results.push({ targetId: t.id, target: t.name, effects: ["🤝 Helping Hand pronto pro próximo ataque (+1d6 no acerto, mais dados de dano)"] });
+      await updateSheet(t.id, (s) => { s.battle.helped = { by: who, round, die: t._die, sides }; });
+      entry.results.push({ targetId: t.id, target: t.name, help: { die: t._die, sides }, effects: [`🤝 +${t._die} (d${sides}) no próximo ataque ou TR, e mais dados de dano`] });
     }
     await pushLog(entry);
     return entry;
   }
 
   // Helping Hand on this attack: chosen helpers (their reaction) and/or one waiting on the attacker.
-  // +1d6 on the attack rolls; damage: +2 amplification points (1 point with a single die), pág. 57
+  // To hit: ONE help die (an ally only has one at a time; the biggest). Damage: each helper adds half
+  // the move's original dice (rounded down); a single die is rolled twice keeping the higher.
   const helpers = opts.helpers ?? [];
   const pendingHelp = (move.attackBonus != null || move.damage) ? aSheet.battle?.helped : null;
   const helped = helpers.length > 0 || !!pendingHelp;
-  if (helped) entry.notes.push(`Helping Hand de ${[...helpers.map((h) => h.name), ...(pendingHelp ? [pendingHelp.by] : [])].join(", ")}`);
+  const helpCount = helpers.length + (pendingHelp ? 1 : 0);
+  const helpSides = Math.max(0, ...helpers.map((hh) => helpDie(rules, getSheet(hh).pkmn)));
+  if (helped) entry.notes.push(`Helping Hand de ${[...helpers.map((hh) => hh.name), ...(pendingHelp ? [pendingHelp.by] : [])].join(", ")}`);
 
   // modifiers from the attacker's stages
   const acc = stage(attacker, "Accuracy");
@@ -183,23 +219,45 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const critAt = Math.max(2, 20 - critMargin);
   const atkStageKey = melee ? "Attack" : "SpecialAttack";
   const burned = !!conditionsOf(aSheet).Burning;
-  const dc = move.saveDC != null ? move.saveDC + acc : null;
+  let dc = move.saveDC != null ? move.saveDC + acc : null;
 
   // 2) every die of the move in ONE throw
   const dmg = move.damage;
   const hasDice = dmg && dmg.amount && dmg.dice;
   // Pontos de Amplificação/Redução (the app's "Mudanças de Status" screen + Helping Hand)
   const aProfHalf = Math.max(1, Math.floor(rules.proficiency(attacker) / 2));
-  const amp = ampPoints(attacker) + (helped && hasDice ? (dmg.amount > 1 ? 2 : 1) : 0);
-  const pts = pointsSummary(amp, redPoints(attacker));
-  const amped = hasDice ? amplifyDice(dmg.amount, dmg.dice, pts.ampGroups) : { amount: 0, bonus: 0 };
-  const dmgAmount = amped.amount;
-  const flatPts = amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0);
-  const reroll = pts.ampReroll && !pts.redReroll ? 1 : pts.redReroll && !pts.ampReroll ? -1 : 0; // 2x keep higher / lower
-  if (amp || redPoints(attacker)) entry.notes.push(`pontos de dano: ${pointsText(amp, redPoints(attacker), dmg?.amount || 1, dmg?.dice || 8) || "—"}`);
+  // the attacker's points (damage it deals) + the target's (damage it receives) are added together (pág. 57)
+  const amp = ampPoints(attacker);
+  const red = redPoints(attacker);
+  const helpExtra = helped && hasDice && dmg.amount > 1 ? helpCount * Math.floor(dmg.amount / 2) : 0;
+  // Stored Power / Power Trip: +1 die per positive stage of the user
+  const ownBoost = fx.dicePerOwnBoost && hasDice ? Object.values(Array.isArray(attacker.stages) ? {} : attacker.stages ?? {}).reduce((a, v) => a + Math.max(0, v), 0) : 0;
+  if (ownBoost) entry.notes.push(`+${ownBoost}d${dmg.dice} pelos estágios positivos`);
+  const helpOneDie = helped && hasDice && dmg.amount === 1;
+  // "Atacante Bestial": once per turn, melee damage dice rolled twice keeping the higher
+  const beast = melee && hasDice && rules.hasFeat(attacker, "Atacante Bestial") && !(tracked && aSheet.battle?.move?.beast);
+  if (beast) entry.notes.push("Atacante Bestial: dano rolado 2x, fica o maior");
+  // { amount, flat, reroll (1 keep higher / -1 keep lower), halvings } for these points
+  const dmgSpec = (a, rd) => {
+    const pts = pointsSummary(a, rd);
+    const amped = hasDice ? amplifyDice(dmg.amount, dmg.dice, pts.ampGroups) : { amount: 0, bonus: 0 };
+    const keepHigh = pts.ampReroll || helpOneDie || beast;
+    return {
+      a, rd,
+      amount: amped.amount + helpExtra + ownBoost,
+      flat: amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0),
+      reroll: keepHigh && !pts.redReroll ? 1 : pts.redReroll && !keepHigh ? -1 : 0,
+      halvings: pts.redHalvings,
+    };
+  };
+  const baseSpec = dmgSpec(amp, red);
+  const dmgAmount = baseSpec.amount;
+  if (amp || red) entry.notes.push(`pontos de dano: ${pointsText(amp, red, dmg?.amount || 1, dmg?.dice || 8) || "—"}`);
+  if (helpExtra) entry.notes.push(`Helping Hand: +${helpExtra}d${dmg.dice} de dano`);
+  else if (helpOneDie) entry.notes.push("Helping Hand: dano rolado 2x, fica o maior");
   const parts = [];
   const want = (p) => parts.push(p) - 1;
-  const dmgParts = () => Array.from({ length: dmg.times }, () => [want({ amount: dmgAmount, sides: dmg.dice, bonus: dmg.bonus }), reroll ? want({ amount: dmgAmount, sides: dmg.dice, bonus: 0 }) : null]);
+  const dmgParts = (sp = baseSpec) => Array.from({ length: dmg.times }, () => [want({ amount: sp.amount, sides: dmg.dice, bonus: dmg.bonus }), sp.reroll ? want({ amount: sp.amount, sides: dmg.dice, bonus: 0 }) : null]);
 
   // targets the move can't touch
   for (const b of blocked) entry.results.push({ target: null, note: `${b.t.name}: ${b.reason}, não foi atingido`, effects: [] });
@@ -220,6 +278,24 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const releasePenalty = diving ? -(Number(/ataque corpo a corpo\s*-\s*(\d)/i.exec(raw.Description ?? "")?.[1]) || 0) : 0;
   if (diving) entry.notes.push(`saiu de ${charging.move} com vantagem${releasePenalty ? ` (${releasePenalty} no acerto)` : ""}`);
   if (jumped) entry.notes.push(`pulou ${fmtM(jumped)} pra alcançar`);
+  // "Ataques à Distância Engajados" (pág. 53): a hostile creature within 1,5 m that isn't incapacitated
+  let engaged = false;
+  if (!melee && move.attackBonus != null && !opts.area) {
+    const near = await OBR.scene.items.getItems((i) => i.id !== attackerItem.id && getSheet(i) && !allies(aSheet, getSheet(i)));
+    for (const o of near) {
+      const os = getSheet(o);
+      if (os.pkmn.hp.current <= 0 || ["Asleep", "Frozen", "Stunned"].some((k) => conditionsOf(os)[k]) || invulnOf(os)) continue;
+      if ((await distanceMeters(attackerItem, o)) <= 1.55) { engaged = true; entry.notes.push(`engajado por ${o.name}: desvantagem no ataque à distância`); break; }
+    }
+  }
+  if (opts.opportunity) entry.notes.push(opts.sentinel ? "reação do Sentinela" : "ataque de oportunidade");
+  // "Mestre de Combate Corpo a Corpo / à Distância": −5 no acerto (ou na CD) para +10 de dano
+  const power = opts.power && (melee ? rules.hasFeat(attacker, "Mestre de Combate Corpo a Corpo") : rules.hasFeat(attacker, "Mestre de Combate à Distância"));
+  if (power) entry.notes.push("−5 / +10 (Mestre de Combate)");
+  if (power && move.attackBonus == null && dc != null) dc -= 5; // a save move: −5 on the DC instead
+  // "Investida Poderosa": after Disparada, a melee attack as a bonus action, +5 damage after 3 m
+  const chargeBonus = cost?.powerCharge && (aSheet.battle?.move?.used ?? 0) >= 3 ? 5 : 0;
+  if (cost?.powerCharge) entry.notes.push(`Investida Poderosa${chargeBonus ? " (+5 de dano)" : ""}`);
 
   const plans = targetItems.map((t) => {
     const tSheet = getSheet(t);
@@ -227,20 +303,33 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     const far = farFromFlier.has(t.id);
     const saveAdv = Math.max(-1, Math.min(1, (tSheet && move.save ? saveAdvantage(tSheet, move.save) : 0) + (far ? 1 : 0)));
     const saveMod = move.saveDC != null && target ? (rules.saves(target)[move.save] ?? 0) + stage(target, "Evasion") : null;
-    const adv = move.attackBonus != null && tSheet ? Math.max(-1, Math.min(1, attackAdvantage(aSheet, tSheet) + (diving ? 1 : 0) - (far ? 1 : 0))) : 0;
+    const adv = move.attackBonus != null && tSheet ? Math.max(-1, Math.min(1,
+      attackAdvantage(aSheet, tSheet, attackerItem.id) + (diving ? 1 : 0) - (far ? 1 : 0) - (engaged ? 1 : 0)
+      + (opts.opportunity && rules.hasFeat(attacker, "Mestre de Combate Corpo a Corpo") ? 1 : 0))) : 0;
     const inv = invulnCheck(tSheet, moveName);
     const contestMod = fx.contest && target ? mod(rules.attributes(target)[fx.contest.attr] ?? 10) : null;
+    // damage this target receives: its own "dano recebido" points join the attacker's
+    const inA = tSheet?.battle?.ampIn ?? 0, inR = tSheet?.battle?.redIn ?? 0;
+    const spec = inA || inR ? dmgSpec(amp + inA, red + inR) : baseSpec;
     return {
-      t, tSheet, target, saveMod, adv, saveAdv, inv,
-      dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: dmgAmount, sides: dmg.dice, bonus: 0 })) : null,
+      t, tSheet, target, saveMod, adv, saveAdv, inv, spec,
+      dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: spec.amount, sides: dmg.dice, bonus: 0 })) : null,
+      // Punishment: +1 die per positive stage of the target (max 7)
+      boost: fx.dicePerTargetBoost && hasDice && target ? (() => {
+        const k = Math.min(fx.dicePerTargetBoost, Object.values(Array.isArray(target.stages) ? {} : target.stages ?? {}).reduce((a, v) => a + Math.max(0, v), 0));
+        return k ? want({ amount: k, sides: dmg.dice, bonus: 0 }) : null;
+      })() : null,
       // team/owner travel with the result so each viewer can hide what they shouldn't see
       r: { targetId: t.id, target: t.name || (target ? rules.name(target) : "Alvo"), effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
       atk: move.attackBonus != null ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
-      help: helped && move.attackBonus != null ? want({ amount: 1, sides: 6, bonus: 0 }) : null,
+      // the waiting die was already rolled; chips roll theirs in this throw
+      help: helpSides && !pendingHelp?.die && move.attackBonus != null ? want({ amount: 1, sides: helpSides, bonus: 0 }) : null,
+      helpFixed: move.attackBonus != null ? Math.max(pendingHelp?.die ?? 0, 0) : 0,
       sav: saveMod != null ? want({ amount: saveAdv ? 2 : 1, sides: 20, bonus: saveMod }) : null,
       con: fx.contest && (fx.contest.status || fx.contest.stages.length) ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
       contestMod,
-      dmg: hasDice && !opts.area ? dmgParts() : null,
+      // (an area rolls once for everyone with the attacker's dice; the target's points then only halve)
+      dmg: hasDice && !opts.area ? dmgParts(spec) : null,
     };
   });
   const sharedDmg = hasDice && (opts.area || !targetItems.length) ? dmgParts() : null;
@@ -248,17 +337,20 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const dice = (i) => rolled[i].dice;
   const pick = (i, adv) => (adv > 0 ? Math.max(...dice(i)) : adv < 0 ? Math.min(...dice(i)) : dice(i)[0]);
   // one hit: the dice (or the better/worse of two rolls when there are rerolling points)
-  const sumHit = ([main, second]) => {
+  const sumHit = ([main, second], sp) => {
     const a = dice(main).reduce((x, y) => x + y, 0);
     if (second == null) return { dice: dice(main), total: a };
     const b = dice(second).reduce((x, y) => x + y, 0);
-    const useB = reroll > 0 ? b > a : b < a;
+    const useB = sp.reroll > 0 ? b > a : b < a;
     return useB ? { dice: dice(second), total: b } : { dice: dice(main), total: a };
   };
-  const sumDamage = (list) => {
-    const hits = list.map(sumHit);
-    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + flatPts, 0) };
+  const sumDamage = (list, sp = baseSpec) => {
+    const hits = list.map((x) => sumHit(x, sp));
+    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + sp.flat, 0) };
   };
+
+  const changes = new Map(); // targetId -> { damage, give: [], stages: [], wake, thaw, smack, clearHelp }
+  const change = (id) => { if (!changes.has(id)) changes.set(id, { damage: 0, give: [], stages: [] }); return changes.get(id); };
 
   // 3) attacks, saves and contests
   let anyHit = false;
@@ -268,8 +360,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     p.crit = false;
     if (p.atk != null) {
       const n = pick(p.atk, p.adv);
-      const bonus = p.help != null ? dice(p.help)[0] : 0;
-      const total = n + move.attackBonus + acc + bonus + releasePenalty;
+      // one help die at a time: the rolled one or the one waiting (the bigger)
+      const bonus = Math.max(p.help != null ? dice(p.help)[0] : 0, p.helpFixed);
+      const total = n + move.attackBonus + acc + bonus + releasePenalty - (power ? 5 : 0);
       const ac = target ? rules.ac(target) + stage(target, "Evasion") : null;
       p.crit = n >= critAt;
       const hit = n !== 1 && (p.crit || ac == null || total >= ac);
@@ -282,8 +375,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (p.sav != null) {
         const n = pick(p.sav, p.saveAdv);
         // natural 20 always passes (and takes no damage), natural 1 always fails (and is a critical hit)
-        const success = n === 20 || (n !== 1 && n + p.saveMod >= dc);
-        r.save = { attr, nat: n, total: n + p.saveMod, dc, success, effectOnly, dis: p.saveAdv < 0 };
+        // a Helping Hand die waiting on the target also goes into its save
+        const hb = p.tSheet?.battle?.helped?.die ?? 0;
+        if (hb) change(p.t.id).clearHelp = true;
+        const success = n === 20 || (n !== 1 && n + p.saveMod + hb >= dc);
+        r.save = { attr, nat: n, total: n + p.saveMod + hb, dc, success, effectOnly, dis: p.saveAdv < 0, help: hb || null };
         if (!effectOnly) {
           if (n === 20) p.hitFactor = 0;
           else if (success) p.hitFactor = 0.5;
@@ -304,17 +400,20 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   // critical hits roll only their extra dice, in a second (small) throw
   const crits = plans.filter((p) => p.crit && p.dmg && p.hitFactor > 0);
-  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.map(() => ({ amount: dmgAmount, sides: dmg.dice, bonus: 0 }))), `${moveName_} CRÍTICO`) : [];
+  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.map(() => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0 }))), `${moveName_} CRÍTICO`) : [];
 
   // 4) damage: stages, burn, type, defense
-  const changes = new Map(); // targetId -> { damage, give: [], stages: [], wake, thaw }
-  const change = (id) => { if (!changes.has(id)) changes.set(id, { damage: 0, give: [], stages: [] }); return changes.get(id); };
   if (dmg) {
     let c = 0;
     const aProf = rules.proficiency(attacker);
     for (const p of plans) {
       if (p.hitFactor === 0) continue;
-      let roll = !hasDice ? { dice: [], total: dmg.bonus * dmg.times } : sumDamage(p.dmg ?? sharedDmg);
+      let roll = !hasDice ? { dice: [], total: dmg.bonus * dmg.times } : (p.dmg ? sumDamage(p.dmg, p.spec) : sumDamage(sharedDmg));
+      if (p.boost != null) {
+        const extra = dice(p.boost);
+        roll = { dice: roll.dice.map((d0, i) => (i === 0 ? [...d0, ...extra] : d0)), total: roll.total + extra.reduce((a, b) => a + b, 0) };
+        p.r.effects.push(`+${extra.length} dado(s) pelos estágios positivos do alvo`);
+      }
       if (p.dmg2) {
         // Gust/Twister on Fly, Earthquake on Dig: double damage dice
         const extra = p.dmg2.map((i) => dice(i));
@@ -328,20 +427,26 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // Ataque/Ataque Especial: + stage x proficiency (a crit ignores the attacker's negative stages)
       let atkStage = stage(attacker, atkStageKey);
       if (p.crit && atkStage < 0) atkStage = 0;
-      let total = roll.total + atkStage * aProf;
+      // Mestre de Combate: +10 once (on a save move, only when the target failed); Investida Poderosa +5
+      const featDmg = (power && (move.attackBonus != null || p.hitFactor === 1) ? 10 : 0) + chargeBonus;
+      let total = roll.total + atkStage * aProf + featDmg;
       if (burned && melee) total = Math.floor(total / 2); // Queimado: melee damage halved
+      // "Ordem da entrada de dano" (pág. 55): ... 8. Defesa/Defesa Especial do alvo,
+      // 9. vulnerabilidades e resistências por último
       const eff = p.target ? rules.effectiveness(move.type, p.target) : 1;
-      let final = Math.floor(Math.max(0, total) * eff);
-      // Defesa/Defesa Especial of the target: - stage x ITS proficiency (a crit ignores positive stages)
-      if (p.target && eff > 0) {
+      let final = Math.max(0, total);
+      if (p.target) {
         let defStage = stage(p.target, melee ? "Defense" : "SpecialDefense");
-        if (p.crit && defStage > 0) defStage = 0;
+        if (p.crit && defStage > 0) defStage = 0; // a crit ignores the defender's positive stages
         final = Math.max(0, final - defStage * rules.proficiency(p.target));
       }
+      final = Math.floor(final * eff);
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
       // Redução: each 2 points halve the final damage (rounded down each time)
-      for (let i = 0; i < pts.redHalvings; i++) final = Math.floor(final / 2);
-      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + flatPts + atkStage * aProf, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
+      // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
+      const halvings = p.dmg ? p.spec.halvings : pointsSummary(0, red + (p.tSheet?.battle?.redIn ?? 0)).redHalvings;
+      for (let i = 0; i < halvings; i++) final = Math.floor(final / 2);
+      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + (p.dmg ? p.spec : baseSpec).flat + atkStage * aProf + featDmg, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
       if (p.target && settings.autoDamage && final > 0) {
         const ch = change(p.t.id);
         ch.damage += final;
@@ -352,15 +457,29 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   }
 
   // 5) effects from the move text
+  const naturalSelf = [];
   for (const p of plans) {
     if (!p.target) continue;
+    // immune to the type of a damaging move: no damage and no secondary effects (pág. 55)
+    if (dmg && rules.effectiveness(move.type, p.target) === 0) continue;
     const ch = change(p.t.id);
     const hit = p.atk == null || p.r.attack.hit;
     const failed = p.r.save && !p.r.save.unknown && !p.r.save.success;
-    if (fx.natural && p.r.attack?.hit && p.r.attack.nat >= fx.natural.min) {
-      if (fx.natural.status) ch.give.push(fx.natural.status);
-      ch.stages.push(...fx.natural.stages);
+    // natural result on the attack roll ("mesmo que o golpe erre": Charge Beam)
+    if (fx.natural && p.r.attack && (p.r.attack.hit || fx.natural.evenMiss) && p.r.attack.nat >= fx.natural.min) {
+      if (fx.natural.self) naturalSelf.push(...fx.natural.stages); // Metal Claw, Ancient Power: the user's
+      else ch.stages.push(...fx.natural.stages);
+      if (fx.natural.table && p.r.attack.hit) {
+        // Dire Claw / Tri Attack: d6 on the table
+        const face = d(6);
+        ch.give.push(fx.natural.table[face - 1]);
+        p.r.effects.push(`d6 = ${face}`);
+      } else if (fx.natural.status && p.r.attack.hit) ch.give.push(fx.natural.status);
     }
+    if (fx.syrup && hit && p.hitFactor > 0) ch.syrup = fx.syrup; // Syrup Bomb: −1 Velocidade a cada turno
+    // Sentinela: an attack of opportunity that hits stops the creature for the rest of the turn
+    if (opts.opportunity && hit && p.hitFactor > 0 && rules.hasFeat(attacker, "Sentinela")) ch.stop = true;
+    if (fx.cureBurn && hit) ch.cureBurn = true; // Sparkling Aria
     if (failed) { if (fx.statusFail) ch.give.push(fx.statusFail); ch.stages.push(...fx.fail); }
     if (hit && fx.direct.length && (dmg ? p.hitFactor > 0 : !move.save)) ch.stages.push(...fx.direct);
     if (p.r.contest?.success) { if (fx.contest.status) ch.give.push(fx.contest.status); ch.stages.push(...fx.contest.stages); }
@@ -370,7 +489,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (moveName === "Smack Down" && hit && p.hitFactor > 0 && (getSheet(p.t)?.battle?.alt > 0 || p.inv?.cancel)) ch.smack = true;
   }
   // a charged move's self stages came when it was activated
-  const selfStages = !releasing && fx.self.length && (move.attackBonus == null || anyHit || !targetItems.length) ? fx.self : [];
+  let selfStages = !releasing && fx.self.length && (move.attackBonus == null || anyHit || !targetItems.length) ? [...fx.self] : [];
+  selfStages.push(...naturalSelf);
+  // Psych Up: the user's stages become a copy of the target's
+  const copyFrom = fx.copyStages && plans[0]?.target ? { ...(Array.isArray(plans[0].target.stages) ? {} : plans[0].target.stages ?? {}) } : null;
+  if (copyFrom) { delete copyFrom.CritMargin; entry.notes.push(`${who} copiou os estágios de ${plans[0].r.target}`); }
 
   if (!targetItems.length) {
     if (dmg) {
@@ -381,18 +504,41 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   // 6) write everything
   // (a charged / invulnerable move already used its PP when it was activated)
-  const usesPP = !releasing && settings.autoPP && typeof move.pp === "number";
+  const usesPP = !releasing && settings.autoPP && typeof move.pp === "number" && !!attacker.moves?.[moveName];
   await updateSheet(attackerItem.id, (s) => {
     if (usesPP) s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - 1);
     spend(s, cost);
+    if (copyFrom) s.pkmn.stages = { ...copyFrom, ...(s.pkmn.stages?.CritMargin ? { CritMargin: s.pkmn.stages.CritMargin } : {}) };
     for (const st of selfStages) addStage(s.pkmn, st.stat, st.delta);
+    if (fx.hpCost) { // Belly Drum: half of its max HP
+      const cost = Math.floor(rules.maxHP(s.pkmn) * fx.hpCost);
+      s.pkmn.hp.current = Math.max(0, s.pkmn.hp.current - cost);
+      entry.notes.push(`${who} perdeu ${cost} HP`);
+    }
+    if (fx.rest) { // Rest: full HP, conditions cured, sleeps
+      s.pkmn.hp.current = rules.maxHP(s.pkmn);
+      s.battle.cond = {};
+      giveCondition(s, "Asleep", rules, {});
+      entry.notes.push(`${who} recuperou todo o HP e dormiu`);
+    }
+    if (fx.refresh) { // Refresh: Queimado, Envenenado, Paralisado
+      for (const k of ["Burning", "Poisoned", "BadlyPoisoned", "Paralyzed"]) if (clearCondition(s, k)) entry.notes.push(`${who} curou ${CONDITIONS[k].label}`);
+    }
+    if (fx.thawSelf && clearCondition(s, "Frozen")) entry.notes.push(`${who} descongelou`);
     if (pendingHelp) delete s.battle.helped; // Helping Hand is for ONE move
     if (s.battle.charging) {
       if (!releasing) entry.notes.push(`a carga de ${s.battle.charging.move} se perdeu`);
       delete s.battle.charging; // released, or lost by using another move
     }
     delete s.battle.prepared;
+    if (opts.opportunity) delete s.battle.oa;
     if (jumped && tracked) { s.battle.move ??= { used: 0 }; s.battle.move.used = Math.round(((s.battle.move.used ?? 0) + jumped) * 10) / 10; }
+    if (tracked) {
+      s.battle.move ??= { used: 0 };
+      if (beast) s.battle.move.beast = true; // Atacante Bestial: once per turn
+      // Mobilidade: no attacks of opportunity from the creatures it attacked in melee this turn
+      if (melee) s.battle.move.meleed = [...new Set([...(s.battle.move.meleed ?? []), ...targetItems.map((t) => t.id)])];
+    }
   });
   if (usesPP) entry.pp = `${move.pp - 1}/${move.ppMax}`;
   if (selfStages.length) entry.notes.push(`${who}: ${stageText(selfStages)}`);
@@ -409,11 +555,15 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     });
   }
   for (const [id, ch] of changes) {
-    if (!ch.damage && !ch.give.length && !ch.stages.length && !ch.smack) continue;
+    if (!ch.damage && !ch.give.length && !ch.stages.length && !ch.smack && !ch.clearHelp && !ch.syrup && !ch.cureBurn && !ch.stop) continue;
     const r = entry.results.find((x) => x.targetId === id);
     const ownTurn = isActive(targetItems.find((t) => t.id === id));
     await updateSheet(id, (s) => {
       if (ch.damage) takeDamage(s.pkmn, ch.damage);
+      if (ch.clearHelp) delete s.battle.helped; // its Helping Hand die went into this save
+      if (ch.syrup) { s.battle.syrup = ch.syrup; r.effects.push(`coberto de xarope (−1 Velocidade por turno, ${ch.syrup} turnos)`); }
+      if (ch.cureBurn && clearCondition(s, "Burning")) r.effects.push("queimadura curada");
+      if (ch.stop) { s.battle.move = { used: 0, ...(s.battle.move ?? {}), stopped: true }; r.effects.push("parado (Sentinela)"); }
       // charging / Focus Punch: concentration (CON save, DC 10 or half the damage)
       const c = s.battle.charging;
       if (c && !c.invuln && ch.damage > 0 && s.pkmn.hp.current > 0) {
@@ -447,6 +597,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   await pushLog(entry);
   if (settings.mapFx) await sendFx(attackerItem, entry, targetItems).catch(() => {});
+  // Sentinela nearby: attacking someone else gives them a reaction attack
+  if (running && !opts.opportunity && (move.attackBonus != null || move.saveDC != null) && targetItems.length) await checkSentinel(rules, attackerItem, targetItems).catch(() => {});
   return entry;
 }
 
@@ -457,17 +609,40 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 export const THROW = "__throw";
 export const throwRange = (rules, pkmn) => 2 + Math.max(0, mod(rules.attributes(pkmn).STR));
 
+// Throwing a creature (opts.creature) at a target (pág. 53):
+//   - an ally or an unconscious creature: no test, full distance;
+//   - an enemy: it must be grappled by the thrower first, and goes half the distance;
+//   - it lands next to the target, at the target's height: thrown up to a flier, it stays in the air
+//     until the end of its next turn (and can hit it in melee), then falls (Queda);
+//   - hitting an enemy target: 1d6 + FOR, +1d6 per size category the creature is bigger than the target;
+//     Ghosts are immune unless the thrown creature is Ghost or Dark.
+// Without opts.creature, it's an object (same damage).
 export async function throwAttack(rules, attackerItem, target, opts = {}) {
   const settings = await getSettings();
   const aSheet = getSheet(attackerItem);
   const pkmn = aSheet.pkmn;
   const who = attackerItem.name || rules.name(pkmn);
+  const thrown = opts.creature ?? null;
+  const cSheet = thrown ? getSheet(thrown) : null;
   if (!target) throw new Error("Escolha o alvo do arremesso no mapa.");
   if (invulnOf(aSheet)) throw new TurnError(`${who} está ${invulnText(aSheet.battle.charging)}.`);
   const inv = invulnCheck(getSheet(target), "Arremessar");
   if (inv?.blocked) throw new Error(`${target.name} está ${inv.reason}: não pode ser alvo.`);
   const str = mod(rules.attributes(pkmn).STR);
-  const range = throwRange(rules, pkmn);
+  let range = throwRange(rules, pkmn);
+  const notes = [];
+  let enemyThrown = false;
+  if (thrown) {
+    if (thrown.id === attackerItem.id || thrown.id === target.id) throw new Error("Escolha duas criaturas diferentes: a arremessada e o alvo.");
+    const willing = !cSheet || cSheet.pkmn.hp.current <= 0 || allies(aSheet, cSheet);
+    if (!willing) {
+      if (conditionsOf(cSheet).Grappled?.by !== attackerItem.id) throw new Error(`${thrown.name} é inimigo: agarre primeiro (🤼 Agarrar), depois arremesse na próxima ação.`);
+      enemyThrown = true;
+      range = Math.floor(range / 2 * 10) / 10;
+      notes.push("inimigo agarrado: metade da distância");
+    }
+    if (settings.checkRange && !opts.ignoreRange && (await distanceMeters(attackerItem, thrown)) > rules.reach(pkmn) + 0.05) throw new Error(`${thrown.name} precisa estar ao alcance de ${who} (${fmtM(rules.reach(pkmn))}).`);
+  }
   const rangeInfo = { kind: "ranged", meters: range, label: fmtM(range) };
   if (settings.checkRange && !opts.ignoreRange) {
     const [r] = await checkRange(attackerItem, { rangeInfo }, [target]);
@@ -475,24 +650,30 @@ export async function throwAttack(rules, attackerItem, target, opts = {}) {
   }
   const running = await combatRunning();
   const cost = opts.force ? null : chooseCost(attackerItem, { "Move Time": "1 ação" }, running);
-  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
   const tSheet = getSheet(target);
   const tp = tSheet?.pkmn;
-  const adv = tSheet ? attackAdvantage(aSheet, tSheet) : 0;
-  const [atk, dm] = await roller.batch([{ amount: adv ? 2 : 1, sides: 20, bonus: str }, { amount: 1, sides: 6, bonus: str }], `${who} arremessa`);
-  const n = adv ? Math.max(...atk.dice) : atk.dice[0];
-  const total = n + str;
-  const ac = tp ? rules.ac(tp) + stage(tp, "Evasion") : null;
-  const crit = n === 20;
-  const hit = n !== 1 && (crit || ac == null || total >= ac);
-  const ghost = !!tp && rules.types(tp).includes("Ghost");
-  const dice = [...dm.dice, ...(crit ? [d(6)] : [])];
-  const final = hit && !ghost ? Math.max(0, dice.reduce((a, b) => a + b, 0) + str) : 0;
-  const r = {
-    targetId: target.id, target: target.name || "Alvo", effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null,
-    attack: { nat: n, total, ac, crit, hit, fumble: n === 1, adv: adv > 0 },
-    damage: hit ? { dice: [dice], sides: 6, bonus: str, rolled: final, eff: ghost ? 0 : 1, effLabel: ghost ? "imune (Fantasma)" : "", final, crit } : null,
-  };
+  const hostileTarget = !tSheet || !allies(aSheet, tSheet);
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  const r = { targetId: target.id, target: target.name || "Alvo", effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null };
+  let final = 0;
+  if (hostileTarget) {
+    // bigger than the target: +1d6 per size category
+    const bigger = thrown && cSheet && tp ? Math.max(0, rules.sizeRank(cSheet.pkmn) - rules.sizeRank(tp)) : 0;
+    const adv = tSheet ? attackAdvantage(aSheet, tSheet, attackerItem.id) : 0;
+    const [atk, dm] = await roller.batch([{ amount: adv ? 2 : 1, sides: 20, bonus: str }, { amount: 1 + bigger, sides: 6, bonus: str }], `${who} arremessa${thrown ? ` ${thrown.name}` : ""}`);
+    const n = adv ? Math.max(...atk.dice) : atk.dice[0];
+    const total = n + str;
+    const ac = tp ? rules.ac(tp) + stage(tp, "Evasion") : null;
+    const crit = n === 20;
+    const hit = n !== 1 && (crit || ac == null || total >= ac);
+    const cTypes = cSheet ? rules.types(cSheet.pkmn) : [];
+    const ghost = !!tp && rules.types(tp).includes("Ghost") && !cTypes.includes("Ghost") && !cTypes.includes("Dark");
+    const dice = [...dm.dice, ...(crit ? dm.dice.map(() => d(6)) : [])];
+    final = hit && !ghost ? Math.max(0, dice.reduce((a, b) => a + b, 0) + str) : 0;
+    r.attack = { nat: n, total, ac, crit, hit, fumble: n === 1, adv: adv > 0 };
+    r.damage = hit ? { dice: [dice], sides: 6, bonus: str, rolled: final, eff: ghost ? 0 : 1, effLabel: ghost ? "imune (Fantasma)" : "", final, crit } : null;
+    if (bigger) notes.push(`+${bigger}d6 (${thrown.name} é maior)`);
+  } else r.effects.push("aliado: só leva a criatura até ele");
   await updateSheet(attackerItem.id, (s) => { spend(s, cost); delete s.battle.prepared; });
   if (tp && final > 0 && settings.autoDamage) {
     await updateSheet(target.id, (s) => takeDamage(s.pkmn, final));
@@ -500,10 +681,88 @@ export async function throwAttack(rules, attackerItem, target, opts = {}) {
     r.hpAfter = `${after.pkmn.hp.current}/${rules.maxHP(after.pkmn)}`;
     if (after.pkmn.hp.current <= 0) r.effects.push("DESMAIOU");
   }
-  const entry = { kind: "move", attacker: who, move: "Arremessar", type: "Sem tipo", results: [r], notes: [`alcance ${fmtM(range)}`], roller: roller.name, cost: cost?.label };
+  // the creature lands next to the target, at its height
+  if (thrown && cSheet) {
+    const height = Math.max(0, Number(tSheet?.battle?.alt) || 0);
+    const spot = await approach(rules, { ...thrown, metadata: {} }, target, { rangeInfo: { kind: "melee", meters: 1.5, label: "corpo a corpo" } }).catch(() => null);
+    await updateSheet(thrown.id, (s, dr) => {
+      if (spot) { dr.position = { ...spot.pos }; s.battle.move = { ...(s.battle.move ?? { used: 0 }), pos: { ...spot.pos } }; }
+      if (enemyThrown && s.battle.cond?.Grappled) delete s.battle.cond.Grappled; // the grapple ends
+      if (height > 0) {
+        s.battle.alt = height;
+        // "manter um aliado no ar por um turno": up until the end of its next turn
+        s.battle.thrown = { readyAt: (s.battle.turns ?? 0) + (isActive(thrown) ? 1 : 0) };
+      }
+    });
+    if (enemyThrown) await updateSheet(attackerItem.id, (s) => { delete s.battle.grabbing; });
+    notes.push(height > 0 ? `${thrown.name} foi parar no ar a ${fmtM(height)}, junto de ${target.name} (fica lá até o fim do próximo turno dele)` : `${thrown.name} caiu junto de ${target.name}`);
+  }
+  const entry = { kind: "move", attacker: who, move: thrown ? `Arremessar ${thrown.name}` : "Arremessar", type: "Sem tipo", results: [r], notes: [`alcance ${fmtM(range)}`, ...notes], roller: roller.name, cost: cost?.label };
   await pushLog(entry);
   if (settings.mapFx) await sendFx(attackerItem, entry, [target]).catch(() => {});
   return entry;
+}
+
+// ------------------------------------------------------------------ Agarrão (pág. 54)
+// Action: FOR (Atletismo) against the target's FOR (Atletismo) or DES (Acrobacia), its best.
+// The target at most one size category bigger, within reach; Ghosts only by Ghost/Dark.
+const athletics = (rules, p) => rules.skillMod(p, "Athletics", "STR");
+const acrobatics = (rules, p) => rules.skillMod(p, "Acrobatics", "DEX");
+
+async function contest(roller, label, a, b) {
+  const [ra, rb] = await roller.batch([{ amount: 1, sides: 20, bonus: a }, { amount: 1, sides: 20, bonus: b }], label);
+  return { a: ra.dice[0] + a, b: rb.dice[0] + b, na: ra.dice[0], nb: rb.dice[0] };
+}
+
+export async function grapple(rules, attackerItem, target, opts = {}) {
+  const settings = await getSettings();
+  const aSheet = getSheet(attackerItem), tSheet = getSheet(target);
+  if (!tSheet) throw new Error("Escolha um Pokémon com ficha pra agarrar.");
+  const who = attackerItem.name;
+  const ap = aSheet.pkmn, tp = tSheet.pkmn;
+  if (rules.types(tp).includes("Ghost") && !rules.types(ap).some((t) => t === "Ghost" || t === "Dark")) throw new Error(`${target.name} é Fantasma: só Fantasma ou Sombrio agarra.`);
+  if (rules.sizeRank(tp) > rules.sizeRank(ap) + 1) throw new Error(`${target.name} é grande demais pra ${who} agarrar.`);
+  if (conditionsOf(tSheet).Grappled) throw new Error(`${target.name} já está agarrado.`);
+  if (!opts.ignoreRange && (await distanceMeters(attackerItem, target)) > rules.reach(ap) + 0.05) throw new OutOfRange([{ name: target.name, reason: `fora do alcance (${fmtM(rules.reach(ap))})` }]);
+  const cost = opts.force ? null : chooseCost(attackerItem, { "Move Time": "1 ação" }, await combatRunning());
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  const def = Math.max(athletics(rules, tp), acrobatics(rules, tp));
+  const c = await contest(roller, `${who} agarra ${target.name}`, athletics(rules, ap), def);
+  const ok = c.a > c.b;
+  await updateSheet(attackerItem.id, (s) => { spend(s, cost); if (ok) s.battle.grabbing = target.id; });
+  if (ok) await updateSheet(target.id, (s) => { s.battle.cond = conditionsOf(s); s.battle.cond.Grappled = { by: attackerItem.id, byName: who, since: s.battle.turns ?? 0, age: 0 }; });
+  const entry = { kind: "note", attacker: who, text: `🤼 tentou agarrar ${target.name}: ${c.a} (d20 ${c.na}) contra ${c.b} (d20 ${c.nb}) — ${ok ? "AGARROU (deslocamento 0)" : "escapou"}${cost ? ` (${cost.label})` : ""}` };
+  await pushLog(entry);
+  return { ...entry, ok, roller: roller.name };
+}
+
+// the grappled creature's action to get free: its FOR (Atletismo) or DES (Acrobacia) against the grappler's FOR (Atletismo)
+export async function escapeGrapple(rules, item, opts = {}) {
+  const settings = await getSettings();
+  const s0 = getSheet(item);
+  const g = conditionsOf(s0).Grappled;
+  if (!g) throw new Error("Não está agarrado.");
+  const [holder] = await OBR.scene.items.getItems([g.by]);
+  const cost = opts.force ? null : chooseCost(item, { "Move Time": "1 ação" }, await combatRunning());
+  const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
+  const mine = Math.max(athletics(rules, s0.pkmn), acrobatics(rules, s0.pkmn));
+  const hp = holder && getSheet(holder) ? getSheet(holder).pkmn : null;
+  const c = await contest(roller, `${item.name} tenta escapar`, mine, hp ? athletics(rules, hp) : 0);
+  const ok = !holder || c.a > c.b;
+  await updateSheet(item.id, (s) => { spend(s, cost); if (ok) delete s.battle.cond.Grappled; });
+  if (ok && holder) await updateSheet(holder.id, (s) => { delete s.battle.grabbing; });
+  const entry = { kind: "note", attacker: item.name, text: `🤼 tentou escapar de ${g.byName}: ${c.a} contra ${c.b} — ${ok ? "ESCAPOU" : "continua agarrado"}` };
+  await pushLog(entry);
+  return entry;
+}
+
+// letting go is free on its turn
+export async function releaseGrapple(item) {
+  const id = getSheet(item)?.battle?.grabbing;
+  if (!id) return;
+  await updateSheet(item.id, (s) => { delete s.battle.grabbing; });
+  await updateSheet(id, (s) => { if (s.battle.cond?.Grappled?.by === item.id) delete s.battle.cond.Grappled; });
+  await pushLog({ kind: "note", attacker: item.name, text: "soltou o agarrão" });
 }
 
 // can this viewer see the AC/HP numbers of a result's target? (players don't see the enemies')

@@ -4,11 +4,11 @@
 //   - out of range (melee or ranged): walks the shortest way into range, paying the movement,
 //     then attacks;
 //   - not enough movement: the prepared action is cancelled and the player chooses again.
-import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.8.4";
-import { fmtM } from "./rules.js?v=0.8.4";
-import { checkRange } from "./map.js?v=0.8.4";
-import { useMove } from "./combat.js?v=0.8.4";
-import { approach, movement, moveToken, jumpOpts } from "./tactics.js?v=0.8.4";
+import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.1";
+import { fmtM } from "./rules.js?v=0.9.1";
+import { checkRange } from "./map.js?v=0.9.1";
+import { useMove } from "./combat.js?v=0.9.1";
+import { approach, movement, moveToken, jumpOpts, checkOpportunity } from "./tactics.js?v=0.9.1";
 
 const fresh = async (id) => (await OBR.scene.items.getItems([id]))[0];
 
@@ -40,7 +40,9 @@ export async function runPrepared(rules, item) {
     const far = targets.find((t) => !res.find((r) => r.id === t.id)?.ok);
     const spot = await approach(rules, attacker, far, move, { maxCost: mv.left });
     if (!spot) return cancel(`não tem deslocamento pra chegar ao alcance de ${far.name} (sobra ${fmtM(mv.left)}${mv.why ? `, ${mv.why}` : ""})`);
+    const from = { ...attacker.position };
     await moveToken(attacker.id, spot.pos, spot.cost);
+    await checkOpportunity(rules, attacker, from, spot.pos); // walking out of a reach still provokes
     walked = spot.cost;
     attacker = await fresh(item.id);
     res = await inRange();
