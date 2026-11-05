@@ -67,8 +67,33 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Pulo (🦘):** num Move corpo a corpo contra um voador, um Pokémon no chão pula sozinho se der: alcança 1,5 m
   acima de si + o salto em altura (1 m + 0,5 m por ponto de FOR; metade se não andou 3 m antes). O pulo gasta
   deslocamento.
-- **🤾 Arremessar (ação):** joga um objeto num alvo até 2 m + 1 m por ponto de FOR (alcança voadores).
-  d20 + FOR contra a CA, 1d6 + FOR de dano sem tipo; Fantasmas são imunes.
+- **🤾 Arremessar (ação, pág. 53):** até 2 m + 1 m por ponto de FOR (alcança voadores). Marque 1 alvo pra jogar
+  um objeto, ou 2 tokens: a criatura arremessada (🫴, ao seu alcance) e o alvo (🎯); ⇄ troca os papéis.
+  Aliado ou inconsciente: sem teste, distância cheia. Inimigo: precisa estar agarrado por você, vai metade da
+  distância e o agarrão termina. Contra inimigo: d20 + FOR contra a CA, 1d6 + FOR (+1d6 por categoria de tamanho
+  que a criatura for maior que o alvo); Fantasmas são imunes, salvo se a criatura for Fantasma ou Sombrio.
+  A criatura cai do lado do alvo, na altura dele: jogada até um voador, **fica no ar até o fim do próximo turno
+  dela** (sem andar) pra bater nele corpo a corpo, depois cai (regra de Queda).
+- **🤼 Agarrar (ação, pág. 54):** FOR (Atletismo) contra FOR (Atletismo) ou DES (Acrobacia) do alvo, o melhor.
+  Alvo até uma categoria maior, ao alcance; Fantasma só por Fantasma/Sombrio. Agarrado = deslocamento 0.
+  O agarrado usa *Escapar* (ação, teste resistido); quem agarra usa *Soltar* (livre).
+- **⚔ Ataque de oportunidade (pág. 54):** ao arrastar um Pokémon pra fora do alcance de um inimigo (1,5 m; 3 m
+  pra Enorme ou maior), o dono do inimigo recebe um aviso e a ficha rápida dele abre com os Moves corpo a corpo
+  de "1 ação" (ou Struggle) e *Ignorar*. Gasta a reação (sem perder a ação do próximo turno) e o PP normal.
+  A chance some quando o turno muda. Não provoca: **🛡 Desengajar** (ação), teletransporte, ser arremessado ou
+  empurrado.
+- **Ataque à distância engajado (pág. 53):** inimigo a até 1,5 m e não incapacitado = desvantagem no ataque.
+- **Ordem do dano (pág. 55):** Defesa/Defesa Especial do alvo antes da fraqueza/resistência. Imune ao tipo de um
+  Move de dano = sem dano e sem efeito secundário.
+- **Talentos com efeito automático:** Alerta, Aumento de CA, Robusto, Incansável, Mobilidade (+3 m e não provoca
+  ataque de oportunidade de quem atacou corpo a corpo no turno), Corpo Apto (carência +3 rodadas), Atleta
+  (levantar com 1,5 m, corrida de 1,5 m pro salto), Mestre de Combate Corpo a Corpo (vantagem no ataque de
+  oportunidade, opção −5/+10), Mestre de Combate à Distância (opção −5 no acerto ou na CD / +10), Atacante
+  Bestial (1x por turno rola o dano corpo a corpo 2x e fica com o maior), Sentinela (acertar o ataque de
+  oportunidade deixa o deslocamento em 0; Desengajar não adianta; reação quando um inimigo a 1,5 m ataca outro),
+  Investida Poderosa (depois da Disparada, ataque corpo a corpo com a ação bônus; +5 se andou 3 m), Escultor de
+  Poder (Moves de área poupam 1 + MOVE aliados), Controlador de Área (área dobrada), Disputador (vantagem contra
+  quem você agarra), Resiliente (TR).
 - **Fly, Bounce, Dig, Dive, Phantom Force, Shadow Force:** no 1º uso o Pokémon gasta a ação, o PP e 3 m de
   deslocamento e fica **🌀 Invulnerável**: ninguém consegue mirar nele (ataques, Helping Hand, áreas), exceto os
   Moves certos: Smack Down (cancela o Fly/Bounce e derruba), Gust e Twister (dados dobrados), Thunder, Hurricane
@@ -95,10 +120,15 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   positivos do defensor. 20 natural no TR = sem dano; 1 natural = crítico.
 - **Moves de status:** o texto do Move é lido pra aplicar sozinho estágios (Swords Dance, Growl, Charm...),
   condições por disputa (Toxic, Thunder Wave, Will-O-Wisp: "1d20 + MOVE + X contra 10 + atributo"), efeitos
-  secundários ("resultado natural de 19 ou 20... fica queimado") e efeitos de TR falho (Nuzzle, Acid Spray).
-  Cerca de 350 dos 838 Moves têm efeito automático; o resto mostra a descrição e o mestre aplica na ficha completa.
+  secundários ("resultado natural de 19 ou 20... fica queimado", tabelas de d6 do Dire Claw e Tri Attack,
+  Metal Claw/Charge Beam no próprio usuário) e efeitos de TR falho (Nuzzle, Acid Spray). Casos especiais: Belly
+  Drum, Stored Power, Power Trip, Punishment, Psych Up, Syrup Bomb, Rest, Refresh, Sparkling Aria, e Moves que
+  descongelam o usuário (Burn Up, Fusion Flare). 336 dos 838 Moves têm efeito automático; os outros dependem de
+  terreno, clima ou proteção (Substitute, Sunny Day...) e o mestre aplica na ficha completa.
 - **Helping Hand:** ao escolher os alvos de um ataque, aparecem seus Pokémon com Helping Hand, reação livre e a até
-  18 m. Marcando, eles gastam a reação, a ação do próximo turno deles e 1 PP: +1d6 no acerto e metade a mais de dados de dano (1 dado: rola 2x).
+  18 m. Marcando, eles gastam a reação, a ação do próximo turno deles e 1 PP. Dado no acerto: d6 (d8 no nível 5,
+  d10 no 10, d12 no 17), um só por vez. Dano: cada ajudante soma metade dos dados originais do Move (1 dado: rola
+  2x e fica com o maior).
 - **Equipes e donos:** cada ficha tem uma equipe (Jogadores, Inimigos ou Neutros) e um dono. Jogador que importa
   vira dono e entra em Jogadores; o mestre escolhe a equipe na importação e pode trocar equipe e dono na ficha
   completa. Cada jogador só usa os próprios Pokémon (ficha rápida e Moves).
@@ -107,9 +137,13 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Token:** barra de HP embaixo de todo Pokémon com ficha, etiqueta com condições e estágios (▲ Atq +2, ▼ Def −1),
   cinza quando desmaia. Pokémon desmaiado sai da iniciativa do Pretty Sordid (se era a vez dele, passa pro próximo).
 - **Mudanças de Status (📊):** popup igual ao do app, com os 8 estágios (−6 a +6) e o efeito de cada um, mais os
-  Pontos de Amplificação e Redução de Dano (passos de 0,5, regras da pág. 57-58). Tudo entra nas contas.
-- **Helping Hand como Move:** usado num aliado, fica esperando no aliado e vale só pro próximo ataque dele (ou até o
-  fim da rodada). Ajuda = +1d6 no acerto e +2 pontos de Amplificação (1 ponto se o Move tem um dado só).
+  Pontos de Amplificação e Redução de Dano (passos de 0,5, regras da pág. 57-58) em duas partes: **dano que ele
+  causa** (o do app) e **dano que ele recebe** (ex.: Reflect = Redução no dano recebido). No golpe, os pontos de quem
+  ataca e os de quem recebe se somam; primeiro a Amplificação, depois a Redução. Tudo entra nas contas.
+- **Helping Hand como Move:** usado num aliado, o dado já rola na hora e fica esperando nele: vale pro próximo
+  ataque (ou TR) dele, junto com os dados de dano extras (ou até o fim da rodada).
+- **Estágios importados do app:** o app exporta estágios vazios como lista (`"stages": []`); a extensão converte
+  pra que os estágios ganhos em combate (Power-Up Punch, Swords Dance...) fiquem salvos.
 - **Ficha rápida arrastável:** segure o ⠿ no título, arraste e solte; ela reabre ali e lembra o lugar.
 - **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre,
   incluindo *Encerrar combate* (zera estágios e ações, tira condições voláteis, Gravemente Envenenado vira Envenenado).
