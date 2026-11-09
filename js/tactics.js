@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.4";
-import { d, fmtM } from "./rules.js?v=0.9.4";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.4";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.4";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.5";
+import { d, fmtM } from "./rules.js?v=0.9.5";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.5";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.5";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -290,14 +290,17 @@ export async function checkOpportunity(rules, mover, from, to) {
   const out = [];
   for (const h of others) {
     const hs = getSheet(h);
-    if (allies(hs, ms) || !canReact(hs) || hs.battle?.oa) continue;
+    if (allies(hs, ms) || hs.battle?.oa || hs.pkmn.hp.current <= 0) continue;
     const reach = rules.reach(hs.pkmn);
     const was = await distanceMeters(h, { ...mover, position: from });
     const now = await distanceMeters(h, { ...mover, position: to });
     if (!(was <= reach + 0.05 && now > reach + 0.05)) continue;
+    // it left an enemy's reach: say in the log why there is no attack when there isn't one
     const sentinel = rules.hasFeat(hs.pkmn, "Sentinela");
-    if (ms.battle?.move?.disengage && !sentinel) continue; // Desengajar
-    if (rules.hasFeat(ms.pkmn, "Mobilidade") && ms.battle?.move?.meleed?.includes(h.id)) continue;
+    const none = (why) => pushLog({ kind: "note", attacker: h.name, text: `${mover.name} saiu do alcance, sem ataque de oportunidade: ${why}` });
+    if (!canReact(hs)) { await none(!econOf(hs).reaction ? `${h.name} já usou a reação` : `${h.name} não pode reagir agora`); continue; }
+    if (ms.battle?.move?.disengage && !sentinel) { await none(`${mover.name} usou Desengajar`); continue; }
+    if (rules.hasFeat(ms.pkmn, "Mobilidade") && ms.battle?.move?.meleed?.includes(h.id)) { await none(`${mover.name} tem Mobilidade e atacou ${h.name} corpo a corpo neste turno`); continue; }
     await offerOpportunity(h, mover, "saiu do alcance");
     out.push(h);
   }

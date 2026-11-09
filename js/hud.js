@@ -1,17 +1,17 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.4";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.4";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.4";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.5";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.5";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.5";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.4";
-import { rollPending } from "./trainer.js?v=0.9.4";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.4";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.4";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.4";
-import { runPrepared } from "./prepared.js?v=0.9.4";
-import { seesTarget } from "./combat.js?v=0.9.4";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.4";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.5";
+import { rollPending } from "./trainer.js?v=0.9.5";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.5";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.5";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.5";
+import { runPrepared } from "./prepared.js?v=0.9.5";
+import { seesTarget } from "./combat.js?v=0.9.5";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.5";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -519,7 +519,8 @@ function buildResult(e) {
       else if (r.save && !r.save.unknown) bits.push(die(r.save.nat, { animate }));
       bits.push(h("b", {}, r.target), " ");
       const full = seesTarget(r, state.viewer);
-      if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null && full ? ` vs ${r.attack.ac}` : ""}) `);
+      if (r.attack?.sure) bits.push(h("span", { class: "ok" }, r.attack.crit ? "CRÍTICO" : "acerto garantido"), " ");
+      else if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (${r.attack.total}${r.attack.ac != null && full ? ` vs ${r.attack.ac}` : ""}) `);
       if (r.save && !r.save.unknown) bits.push(h("span", { class: r.save.success ? "no" : "ok" }, `${r.save.effectOnly ? "efeito: " : ""}TR ${r.save.total} vs ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
       if (r.save?.unknown) bits.push(`TR ${r.save.attr} CD ${r.save.dc} `);
       if (r.contest) bits.push(h("span", { class: r.contest.success ? "ok" : "no" }, r.contest.auto ? "acerto automático " : `${r.contest.total} vs ${r.contest.vs} ${r.contest.success ? "pegou" : "resistiu"} `));

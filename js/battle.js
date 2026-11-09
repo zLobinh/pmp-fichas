@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.4";
-import { d } from "./rules.js?v=0.9.4";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.5";
+import { d } from "./rules.js?v=0.9.5";
 
 // ------------------------------------------------------------------ conditions
 
@@ -305,7 +305,10 @@ export function chooseCost(item, move, combatRunning) {
     }
     if (t.action && econ.action) return { spend: ["action"], label: "ação" };
     if (t.bonus && econ.bonus) return { spend: ["bonus"], label: "ação bônus" };
-    if (t.reaction && econ.reaction && !has(sheet, "Confused")) {
+    // "1 ação / reação" moves (Quick Attack, Vacuum Wave, Pursuit...): the reaction form is only used
+    // out of its own turn (the book), so on its turn with the action gone it fails instead of
+    // burning the reaction that an attack of opportunity would need
+    if (t.reaction && !t.action && econ.reaction && !has(sheet, "Confused")) {
       const lose = reactionLosesAction(t);
       return { spend: ["reaction"], label: lose ? "reação, perde a ação do próximo turno" : "reação", reaction: true, losesNextAction: lose };
     }

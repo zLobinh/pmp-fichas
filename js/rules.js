@@ -219,14 +219,27 @@ export class Rules {
       save: move.Save ?? null,
       damage: null,
     };
-    if (move.atk === true && !move.autohit) out.attackBonus = (powerMod ?? 0) + this.proficiency(pkmn);
+    const desc = move.Description ?? "";
+    // "Faça dois/três ataques": one attack roll per strike (Double Kick, Dual Wingbeat, Triple Axel...);
+    // the app's Move Power already carries the "com -1" of the text
+    const many = /fa[çc]a\s+(dois|duas|tr[êe]s|2|3)\s+ataques/i.exec(desc);
+    if (many) {
+      out.hits = { dois: 2, duas: 2, "2": 2 }[many[1].toLowerCase()] ?? 3;
+      out.firstOnlyBonus = /apenas ao dano do primeiro golpe/i.test(desc);
+      out.scaleDice = /triplo da quantidade de dados/i.test(desc); // Triple Axel: 1x, 2x, 3x the dice
+    }
+    // "acerto garantido" (Swift, Aerial Ace...): no attack against the AC, the d20 only says if it's a crit
+    if (move.atk !== true && !many && move.Damage && !move.Save
+      && /acerto garantido|garantid[oa] de acertar|imposs[íi]vel (para ela |de )?desviar|n[ãa]o (pode|consegue) errar|sempre acerta/i.test(desc)) out.sureHit = true;
+    if ((move.atk === true || many) && !move.autohit) out.attackBonus = (powerMod ?? 0) + this.proficiency(pkmn);
     if (move.Save) out.saveDC = 8 + (powerMod ?? 0) + this.proficiency(pkmn);
     const dmg = move.Damage?.[this.levelIndex(pkmn)];
     if (dmg) {
       let bonus = stab + (dmg.level ? this.level(pkmn) : 0);
-      if (dmg.move) bonus += this.movePower(pkmn, move, false) ?? 0;
-      out.damage = { amount: dmg.amount, dice: dmg.dice_max, bonus, times: Number(dmg.times) || 1 };
-      out.damageText = formatDamage(out.damage);
+      const moveMod = dmg.move ? this.movePower(pkmn, move, false) ?? 0 : 0;
+      bonus += moveMod;
+      out.damage = { amount: dmg.amount, dice: dmg.dice_max, bonus, times: Number(dmg.times) || 1, moveMod };
+      out.damageText = formatDamage(out.damage) + (out.hits ? ` por golpe (${out.hits} ataques)` : "");
     }
     return out;
   }

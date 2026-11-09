@@ -4,21 +4,21 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.4";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.4";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.4";
-import { getRoller } from "./dice.js?v=0.9.4";
-import { defenses, endure } from "./protect.js?v=0.9.4";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.4";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.5";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.5";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.5";
+import { getRoller } from "./dice.js?v=0.9.5";
+import { defenses, endure } from "./protect.js?v=0.9.5";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.5";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.4";
+} from "./battle.js?v=0.9.5";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.4";
+} from "./tactics.js?v=0.9.5";
 
 export { TurnError };
 
@@ -326,7 +326,16 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const chargeBonus = cost?.powerCharge && (aSheet.battle?.move?.used ?? 0) >= 3 ? 5 : 0;
   if (cost?.powerCharge) entry.notes.push(`Investida Poderosa${chargeBonus ? " (+5 de dano)" : ""}`);
 
-  const plans = targetItems.map((t) => {
+  // several strikes (Double Kick, Dual Wingbeat, Triple Dive...): one attack roll each; with more
+  // than one target chosen, the strikes go round them in order
+  const nHits = move.hits > 1 && !opts.area && targetItems.length ? move.hits : 1;
+  if (nHits > 1 && targetItems.length > nHits) throw new Error(`${move.label}: são ${nHits} golpes, escolha até ${nHits} alvos.`);
+  const seq = nHits > 1 ? Array.from({ length: nHits }, (_, i) => ({ t: targetItems[i % targetItems.length], strike: i })) : targetItems.map((t) => ({ t, strike: 0 }));
+  if (nHits > 1) entry.notes.push(`${nHits} golpes${move.firstOnlyBonus ? " (bônus de MOVE só no 1º)" : ""}`);
+  // sure-hit moves (Swift, Aerial Ace): a d20 per target only for the critical
+  if (move.sureHit && targetItems.length) entry.notes.push("acerto garantido (o d20 só decide o crítico)");
+
+  const plans = seq.map(({ t, strike }) => {
     const tSheet = getSheet(t);
     const target = tSheet?.pkmn;
     const far = farFromFlier.has(t.id);
@@ -339,9 +348,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     const contestMod = fx.contest && target ? mod(rules.attributes(target)[fx.contest.attr] ?? 10) : null;
     // damage this target receives: its own "dano recebido" points join the attacker's
     const inA = tSheet?.battle?.ampIn ?? 0, inR = tSheet?.battle?.redIn ?? 0;
-    const spec = inA || inR ? dmgSpec(amp + inA, red + inR) : baseSpec;
+    const spec0 = inA || inR ? dmgSpec(amp + inA, red + inR) : baseSpec;
+    // Triple Axel: the 2nd strike rolls twice the dice, the 3rd three times; the MOVE bonus only on the 1st
+    const spec = nHits > 1 ? { ...spec0, amount: spec0.amount * (move.scaleDice ? strike + 1 : 1), cut: move.firstOnlyBonus && strike > 0 ? (dmg?.moveMod ?? 0) : 0 } : spec0;
     return {
-      t, tSheet, target, saveMod, adv, saveAdv, inv, spec,
+      t, tSheet, target, saveMod, adv, saveAdv, inv, spec, strike,
       dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: spec.amount, sides: dmg.dice, bonus: 0 })) : null,
       // Punishment: +1 die per positive stage of the target (max 7)
       boost: fx.dicePerTargetBoost && hasDice && target ? (() => {
@@ -349,8 +360,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         return k ? want({ amount: k, sides: dmg.dice, bonus: 0 }) : null;
       })() : null,
       // team/owner travel with the result so each viewer can hide what they shouldn't see
-      r: { targetId: t.id, target: t.name || (target ? rules.name(target) : "Alvo"), effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
+      r: { targetId: t.id, target: `${t.name || (target ? rules.name(target) : "Alvo")}${nHits > 1 ? ` (${strike + 1}º golpe)` : ""}`, effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
       atk: move.attackBonus != null ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
+      sure: move.sureHit && move.attackBonus == null ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
       // the waiting die was already rolled; chips roll theirs in this throw
       help: helpSides && !pendingHelp?.die && move.attackBonus != null ? want({ amount: 1, sides: helpSides, bonus: 0 }) : null,
       helpFixed: move.attackBonus != null ? Math.max(pendingHelp?.die ?? 0, 0) : 0,
@@ -375,7 +387,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   };
   const sumDamage = (list, sp = baseSpec) => {
     const hits = list.map((x) => sumHit(x, sp));
-    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + sp.flat, 0) };
+    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + sp.flat - (sp.cut ?? 0), 0) };
   };
 
   const changes = new Map(); // targetId -> { damage, give: [], stages: [], wake, thaw, smack, clearHelp }
@@ -397,6 +409,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       const hit = n !== 1 && (p.crit || ac == null || total >= ac);
       r.attack = { nat: n, total, ac, crit: p.crit, hit, fumble: n === 1, adv: p.adv > 0, help: bonus || null };
       if (!hit) p.hitFactor = 0;
+    } else if (p.sure != null) {
+      // acerto garantido: always hits, even on a natural 1; the d20 only for the critical
+      const n = dice(p.sure)[0];
+      p.crit = n >= critAt;
+      r.attack = { nat: n, total: null, ac: null, crit: p.crit, hit: true, fumble: false, adv: false, help: null, sure: true };
     }
     if (dc != null && (p.atk == null || r.attack.hit)) {
       const attr = ATTR_PT[move.save] ?? move.save;
@@ -437,7 +454,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     const aProf = rules.proficiency(attacker);
     for (const p of plans) {
       if (p.hitFactor === 0) continue;
-      let roll = !hasDice ? { dice: [], total: dmg.bonus * dmg.times } : (p.dmg ? sumDamage(p.dmg, p.spec) : sumDamage(sharedDmg));
+      let roll = !hasDice ? { dice: [], total: (dmg.bonus - (p.spec.cut ?? 0)) * dmg.times } : (p.dmg ? sumDamage(p.dmg, p.spec) : sumDamage(sharedDmg));
       if (p.boost != null) {
         const extra = dice(p.boost);
         roll = { dice: roll.dice.map((d0, i) => (i === 0 ? [...d0, ...extra] : d0)), total: roll.total + extra.reduce((a, b) => a + b, 0) };
@@ -475,7 +492,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
       const halvings = p.dmg ? p.spec.halvings : pointsSummary(0, red + (p.tSheet?.battle?.redIn ?? 0)).redHalvings;
       for (let i = 0; i < halvings; i++) final = Math.floor(final / 2);
-      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + (p.dmg ? p.spec : baseSpec).flat + atkStage * aProf + featDmg, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
+      p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + (p.dmg ? p.spec : baseSpec).flat - (p.spec.cut ?? 0) + atkStage * aProf + featDmg, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
       if (p.target && settings.autoDamage && final > 0) {
         const ch = change(p.t.id);
         ch.damage += final;
@@ -864,7 +881,8 @@ export function describe(entry, viewer) {
     const full = seesTarget(r, viewer);
     const vsAC = (ac) => (ac != null && full ? ` vs CA ${ac}` : "");
     let s = r.target + ": ";
-    if (r.attack) s += r.attack.crit ? "CRÍTICO! " : r.attack.hit ? `acertou (${r.attack.total}${vsAC(r.attack.ac)}) ` : r.attack.fumble ? "errou (1 natural) " : `errou (${r.attack.total}${vsAC(r.attack.ac)}) `;
+    if (r.attack?.sure) s += r.attack.crit ? `CRÍTICO! (acerto garantido, d20 ${r.attack.nat}) ` : `acerto garantido (d20 ${r.attack.nat}) `;
+    else if (r.attack) s += r.attack.crit ? "CRÍTICO! " : r.attack.hit ? `acertou (${r.attack.total}${vsAC(r.attack.ac)}) ` : r.attack.fumble ? "errou (1 natural) " : `errou (${r.attack.total}${vsAC(r.attack.ac)}) `;
     if (r.save) s += (r.save.effectOnly ? "efeito: " : "") + (r.save.unknown ? `TR ${r.save.attr} CD ${r.save.dc} ` : `TR ${r.save.attr} ${r.save.total} vs CD ${r.save.dc} ${r.save.success ? "(passou) " : "(falhou) "}`);
     if (r.contest) s += `${r.contest.auto ? "acerto automático" : `${r.contest.total} vs ${r.contest.vs}`} ${r.contest.success ? "(pegou) " : "(resistiu) "}`;
     if (r.damage) s += `${r.damage.final} de dano${r.damage.effLabel ? ` (${r.damage.effLabel})` : ""}${r.damage.half ? " (metade)" : ""}`;

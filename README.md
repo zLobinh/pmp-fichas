@@ -202,6 +202,13 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   combate, o painel do treinador abre pro dono escolher quem entra.
 - **Trainer Card:** o painel do treinador virou um cartão com os 6 Pokémon em molduras, a arte do token do
   treinador, 8 insígnias (o mestre clica pra marcar) e o botão *Descanso longo* (equipe toda, fora do combate).
+- **Moves de vários golpes** ("Faça dois/três ataques": Double Kick, Dual Wingbeat, Triple Dive...): uma rolagem
+  de ataque por golpe, bônus de MOVE só no 1º, Triple Axel com 1x/2x/3x os dados. Com mais de um alvo
+  selecionado, os golpes se revezam entre eles.
+- **Acerto garantido** (Swift, Aerial Ace...): rola o d20 só pra ver o crítico; acerta sempre, até no 1 natural.
+- **Moves "1 ação / reação"** (Quick Attack, Vacuum Wave, Pursuit): a reação só vale fora do próprio turno; no
+  turno, sem a ação, o Move não sai (antes gastava a reação e tirava o ataque de oportunidade). Quando alguém sai
+  do alcance e não há ataque de oportunidade, o registro diz o motivo (reação gasta, Desengajar, Mobilidade).
 - **Talentos e habilidades** na ficha completa (clique pra ver a descrição) e os talentos na ficha rápida.
 - **Equipes:** passar um Pokémon ou treinador pra um jogador já coloca na equipe Jogadores. Protect e ataque de
   oportunidade só valem entre equipes diferentes (o Protect também vale contra Move de dano de aliado).

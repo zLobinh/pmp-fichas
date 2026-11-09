@@ -1,14 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.4";
-import { getRoller } from "./dice.js?v=0.9.4";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.4";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.4";
-import { openStages } from "./ui.js?v=0.9.4";
-import { TurnError } from "./combat.js?v=0.9.4";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.4";
-import { useMove, describe, seesTarget } from "./combat.js?v=0.9.4";
-import { TYPE_COLOR, die } from "./ui.js?v=0.9.4";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.4";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.5";
+import { getRoller } from "./dice.js?v=0.9.5";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.5";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.5";
+import { openStages } from "./ui.js?v=0.9.5";
+import { TurnError } from "./combat.js?v=0.9.5";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.5";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.9.5";
+import { TYPE_COLOR, die } from "./ui.js?v=0.9.5";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.5";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -237,7 +237,8 @@ function buildResult(e) {
     const nat = r.attack?.nat ?? (r.save && !r.save.unknown ? r.save.nat : null);
     const bits = [nat != null ? die(nat, { animate, kind: r.attack?.crit ? "crit" : r.attack?.fumble ? "fumble" : "" }) : null, " ", h("b", {}, r.target), ": "];
     const full = seesTarget(r, state.viewer);
-    if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (d20 ${r.attack.nat} → ${r.attack.total}${r.attack.ac != null && full ? ` vs CA ${r.attack.ac}` : ""}) `);
+    if (r.attack?.sure) bits.push(h("span", { class: "ok" }, r.attack.crit ? "CRÍTICO" : "acerto garantido"), ` (d20 ${r.attack.nat}, só pro crítico) `);
+    else if (r.attack) bits.push(h("span", { class: r.attack.hit ? "ok" : "no" }, r.attack.crit ? "CRÍTICO" : r.attack.hit ? "acertou" : "errou"), ` (d20 ${r.attack.nat} → ${r.attack.total}${r.attack.ac != null && full ? ` vs CA ${r.attack.ac}` : ""}) `);
     if (r.save) bits.push(r.save.effectOnly ? "efeito secundário: " : "", r.save.unknown ? `TR ${r.save.attr} CD ${r.save.dc} (alvo sem ficha, role na mesa) ` : h("span", { class: r.save.success ? "no" : "ok" }, `TR ${r.save.attr} ${r.save.total} vs CD ${r.save.dc} ${r.save.success ? "passou" : "falhou"} `));
     if (r.damage) bits.push(h("b", {}, `${r.damage.final} de dano`), ` [${r.damage.dice.map((x) => x.join("+")).join(" | ")}]${r.damage.effLabel ? ` ${r.damage.effLabel}` : ""}${r.damage.half ? " (metade)" : ""}`);
     if (r.hpAfter && full) bits.push(` → HP ${r.hpAfter}`);
