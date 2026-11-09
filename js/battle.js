@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.1";
-import { d } from "./rules.js?v=0.9.1";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.2";
+import { d } from "./rules.js?v=0.9.2";
 
 // ------------------------------------------------------------------ conditions
 
@@ -470,6 +470,8 @@ export async function startTurn(rules, item) {
     b.econ = { ...econOf(sheet), reaction: !recharging };
     delete b.econ.loseReaction;
     if (b.paraLock) { delete b.paraLock; }
+    // Protect, Wide Guard, Endure...: "até o início de seu próximo turno"
+    if (b.protection) { notes.push(`${b.protection.move} acabou`); delete b.protection; }
     if (b.econ.loseAction) {
       b.econ.action = false; b.econ.loseAction = false;
       notes.push(recharging ? "recarregando: sem ação padrão nem reação neste turno" : "perdeu a ação padrão deste turno (adiantou com uma reação)");

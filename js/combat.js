@@ -4,19 +4,20 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.1";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.1";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.1";
-import { getRoller } from "./dice.js?v=0.9.1";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.2";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.2";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.2";
+import { getRoller } from "./dice.js?v=0.9.2";
+import { defenses, endure } from "./protect.js?v=0.9.2";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.1";
+} from "./battle.js?v=0.9.2";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.1";
+} from "./tactics.js?v=0.9.2";
 
 export { TurnError };
 
@@ -114,6 +115,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (running && !opts.force && !isActive(attackerItem)) throw new TurnError("Focus Punch só sai no turno deste Pokémon.");
     cost = null;
     entry.cost = "ação livre";
+  } else if (opts.defense && tracked && !opts.force) {
+    // a defensive reaction that is a move (Upper Hand): the reaction and the next action
+    if (!econOf(aSheet).reaction) throw new TurnError("A reação já foi usada.");
+    cost = { spend: ["reaction"], label: "reação (defesa), perde a ação do próximo turno", reaction: true, losesNextAction: true };
+    entry.cost = cost.label;
   } else if (opts.opportunity && tracked && !opts.force) {
     // ataque de oportunidade (pág. 54): the reaction, with a melee "1 ação" move; it doesn't take the next action
     if (!econOf(aSheet).reaction) throw new TurnError("A reação já foi usada.");
@@ -201,6 +207,28 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     }
     await pushLog(entry);
     return entry;
+  }
+
+  // Protect, Wide Guard, Quick Guard, Crafty Shield, Upper Hand (protect.js): protections already up
+  // block right away; who can still react is asked (5 s). A blocked target gets no rolls at all.
+  if (!opts.defense && running && targetItems.length) {
+    const guard = await defenses(rules, { attackerItem, move, raw, targets: targetItems, area: !!opts.area });
+    entry.notes.push(...guard.notes);
+    for (const b of guard.blocked) entry.results.push({ target: null, note: b.note });
+    targetItems = targetItems.filter((t) => !guard.blocked.some((b) => b.id === t.id));
+    if (guard.canceled || !targetItems.length) {
+      // the move was still used: PP and the action are gone
+      await updateSheet(attackerItem.id, (s) => {
+        if (settings.autoPP && typeof move.pp === "number" && s.pkmn.moves[moveName] && !releasing) s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - 1);
+        spend(s, cost);
+        delete s.battle.prepared;
+        if (s.battle.charging && releasing) delete s.battle.charging;
+      });
+      if (guard.canceled) entry.results.push({ target: null, note: guard.canceled });
+      entry.failed = true;
+      await pushLog(entry);
+      return entry;
+    }
   }
 
   // Helping Hand on this attack: chosen helpers (their reaction) and/or one waiting on the attacker.
@@ -553,6 +581,10 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       s.battle.econ = { action: true, bonus: true, ...(s.battle.econ ?? {}), reaction: false, ...(running && inInitiative(h) ? { loseAction: true } : {}) };
       if (settings.autoPP && typeof rules.movePP(s.pkmn, "Helping Hand") === "number") s.pkmn.moves["Helping Hand"].pp = Math.max(0, rules.movePP(s.pkmn, "Helping Hand") - 1);
     });
+  }
+  // Endure: a hit that would knock someone out (its owner is asked, 5 s)
+  if (!opts.defense && running && [...changes.values()].some((c) => c.damage > 0)) {
+    await endure(rules, { attackerItem, move, targets: targetItems, changes, results: entry.results });
   }
   for (const [id, ch] of changes) {
     if (!ch.damage && !ch.give.length && !ch.stages.length && !ch.smack && !ch.clearHelp && !ch.syrup && !ch.cureBurn && !ch.stop) continue;

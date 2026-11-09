@@ -1,13 +1,13 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.1";
-import { describe } from "./combat.js?v=0.9.1";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.1";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.1";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.1";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.1";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.1";
-import { runPrepared } from "./prepared.js?v=0.9.1";
-import { loadRules } from "./store.js?v=0.9.1";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.2";
+import { describe } from "./combat.js?v=0.9.2";
+import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.2";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.2";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.2";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.2";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.2";
+import { runPrepared } from "./prepared.js?v=0.9.2";
+import { loadRules } from "./store.js?v=0.9.2";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -105,6 +105,36 @@ OBR.onReady(() => {
 
   // an attack of opportunity offered to one of MY Pokémon: warn and open its quick sheet
   // (the GM answers for Pokémon whose owner is not a player in the room)
+  // a defense request (Protect, Wide Guard, Endure...) for one of MY Pokémon: the 5-second popup,
+  // at the top of the screen (the GM answers for Pokémon whose owner is not in the room)
+  const seenAsk = new Set();
+  let defendSlot = 0;
+  OBR.scene.items.onChange(async (items) => {
+    for (const it of items) {
+      const s = getSheet(it);
+      const ask = s?.battle?.defenseAsk;
+      if (!ask || seenAsk.has(ask.req + it.id)) continue;
+      seenAsk.add(ask.req + it.id);
+      if (Date.now() - ask.at > 8000) continue; // an old one left behind
+      const players = await OBR.party.getPlayers().catch(() => []);
+      const ownerHere = players.some((p) => p.id === s.owner);
+      if (!(s.owner === viewer.id || (viewer.role === "GM" && !ownerHere))) continue;
+      const width = await OBR.viewport.getWidth();
+      const slot = defendSlot++ % 3; // several at once (an area): stacked
+      OBR.popover.open({
+        id: `${ID}/defend/${it.id}`,
+        url: asset(`defend.html?id=${encodeURIComponent(it.id)}&req=${encodeURIComponent(ask.req)}`),
+        width: 340,
+        height: 150 + ask.options.length * 46,
+        anchorReference: "POSITION",
+        anchorPosition: { left: width / 2, top: 70 + slot * 40 },
+        anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
+        transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
+        disableClickAway: true,
+      }).catch(() => {});
+    }
+  });
+
   const seenOa = new Map();
   OBR.scene.items.onChange(async (items) => {
     for (const it of items) {

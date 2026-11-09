@@ -184,3 +184,12 @@ select { background: var(--panel-2); border: 1px solid var(--line); border-radiu
 
 /* ficha rápida que não cabe onde está: rola em vez de cortar */
 body.hud-body.hud-scroll { height: 100vh; overflow-y: auto; }
+
+/* "defend?" popup (Protect, Wide Guard...) */
+body.defend-body { background: var(--panel, #1e2231); }
+.defend { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.defend-time { font-size: 18px; color: var(--warn, #f0b03f); }
+.defend-bar { height: 6px; border-radius: 3px; background: rgba(127,127,127,.25); overflow: hidden; }
+.defend-bar i { display: block; height: 100%; background: var(--warn, #f0b03f); transition: width .2s linear; }
+.defend-opts { display: flex; flex-direction: column; gap: 5px; }
+.defend-opts button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 1px; }

@@ -77,6 +77,25 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **🤼 Agarrar (ação, pág. 54):** FOR (Atletismo) contra FOR (Atletismo) ou DES (Acrobacia) do alvo, o melhor.
   Alvo até uma categoria maior, ao alcance; Fantasma só por Fantasma/Sombrio. Agarrado = deslocamento 0.
   O agarrado usa *Escapar* (ação, teste resistido); quem agarra usa *Soltar* (livre).
+- **Defesas por reação (Protect e parecidos):** quando um Pokémon de outra equipe usa um Move, antes de qualquer
+  rolagem a extensão vê quem pode reagir e abre na tela do dono (ou do mestre, se o Pokémon for dele ou o dono não
+  estiver na sala) um popup com **5 segundos**. Só aparece pra quem tem o Move, PP, reação livre e não está
+  incapacitado nem já abriu mão da ação do próximo turno. Defender gasta a reação, a ação do próximo turno e 1 PP;
+  sem resposta = não defendeu. O alvo protegido não rola acerto nem dano.
+  - **Protect, Detect, Spiky Shield, Baneful Bunker, Silk Trap, Burning Bulwark:** qualquer Move de alvo único;
+    **King's Shield, Obstruct:** só os danosos. Valem até o início do próximo turno do Pokémon: os ataques seguintes
+    são bloqueados sem perguntar.
+  - **Efeitos de contato** (atacante corpo a corpo): Spiky Shield dano igual ao nível dele, Baneful Bunker
+    envenena, Burning Bulwark queima, Silk Trap −1 Velocidade, King's Shield −2 Ataque, Obstruct −2 Defesa.
+  - **Wide Guard:** Moves em área ou de vários alvos (você e aliados a até 6 m). **Quick Guard:** Moves de
+    Prioridade (aliados a até 9 m). **Crafty Shield:** Moves de status (aliados a até 3 m).
+  - **Upper Hand:** contra um Move de Prioridade em você ou num aliado ao alcance do seu deslocamento, rola o
+    contra-ataque; se acertar, o atacante fica atordoado e o ataque é cancelado.
+  - **Endure:** pergunta quando o dano vai derrubar: fica com 1 HP, e continua assim até o próximo turno.
+  - **Uso seguido (regra do livro):** se usou algum desses na rodada anterior, rola 1d6 por uso seguido bem-sucedido
+    (máx. 6d6) e só funciona se todos derem 5 ou 6. Wide Guard e Quick Guard não perdem precisão entre si, mas
+    contam pros outros. Falhando, a reação e a ação são gastas do mesmo jeito.
+  - Moves de Prioridade são os que dizem "Prioridade N" no texto (Fake Out, Quick Attack, Extreme Speed...).
 - **⚔ Ataque de oportunidade (pág. 54):** ao arrastar um Pokémon pra fora do alcance de um inimigo (1,5 m; 3 m
   pra Enorme ou maior), o dono do inimigo recebe um aviso e a ficha rápida dele abre com os Moves corpo a corpo
   de "1 ação" (ou Struggle) e *Ignorar*. Gasta a reação (sem perder a ação do próximo turno) e o PP normal.

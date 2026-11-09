@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prévia do popup de defesa</title>
+    <!-- swaps the real Owlbear SDK for the in-memory mock -->
+    <script type="importmap">
+      { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js?v=8" } }
+    </script>
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>body { width: 340px; border: 1px dashed #555; }</style>
+  </head>
+  <body class="defend-body">
+    <div id="root"></div>
+    <!-- a pending request on Charmander ("b"), like the attacker's browser would leave it -->
+    <script type="module">
+      import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+      const b = window.__mock.items.find((i) => i.id === "b");
+      const s = b.metadata["com.pmp-fichas/sheet"];
+      s.pkmn.moves.Protect = { index: 9 };
+      s.pkmn.moves["Spiky Shield"] = { index: 10 };
+      s.battle = { econ: { action: true, bonus: true, reaction: true }, guardStreak: window.__streak ?? undefined };
+      s.battle.defenseAsk = { req: "teste", kind: "guard", attackerId: "a", attackerName: "Bulbasaur", move: "Tackle",
+        targets: ["Charmander"], targetIds: ["b"], options: ["Protect", "Spiky Shield"], at: Date.now() };
+      await OBR.scene.setMetadata({ "com.pretty-initiative/roundCount": 2 });
+      await import("../js/defend.js");
+    </script>
+  </body>
+</html>
