@@ -1,16 +1,17 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.2";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.2";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.2";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.3";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.3";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.3";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.2";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.2";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.2";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.2";
-import { runPrepared } from "./prepared.js?v=0.9.2";
-import { seesTarget } from "./combat.js?v=0.9.2";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.2";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.3";
+import { rollPending } from "./trainer.js?v=0.9.3";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.3";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.3";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.3";
+import { runPrepared } from "./prepared.js?v=0.9.3";
+import { seesTarget } from "./combat.js?v=0.9.3";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.3";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -163,7 +164,7 @@ function initiativeBlock(pkmn) {
     init?.active ? h("button", { class: "small", disabled: state.busy, title: "Passa a vez pro próximo da iniciativa", onclick: () => act(async () => {
       await passTurn(state.attackerId);
       // end/start of turn right here (the GM's browser would do it too, but this way it never waits on it)
-      await processTurn(state.rules, { onTurnStart: (it) => runPrepared(state.rules, it) });
+      await processTurn(state.rules, { onTurnStart: (it) => runPrepared(state.rules, it), onNewRound: () => rollPending(state.rules) });
     }) }, "⏭ Passar") : null,
     h("button", {
       class: "small",
@@ -253,6 +254,18 @@ function actionsBlock() {
 }
 
 // an attack of opportunity waiting for this Pokémon's owner to decide
+// a Pokémon of a trainer: switch it (or it must switch: Roar, U-turn...)
+function switchBlock() {
+  const s = getSheet(state.item);
+  if (!s?.trainer) return null;
+  const must = s.battle?.mustSwitch;
+  return h("div", { class: `row small ${must ? "hud-target" : ""}`, style: "gap:6px;margin:2px 0;padding:2px 6px" },
+    must ? h("b", { class: "no" }, `Tem que trocar (${must.by})`) : h("span", { class: "muted" }, "Pokémon de treinador"),
+    s.battle?.trapped ? h("span", { class: "chip down", title: "Não pode ser trocado voluntariamente" }, `preso: ${s.battle.trapped.move}`) : null,
+    h("span", { class: "spacer" }),
+    h("button", { class: `small ${must ? "primary" : ""}`, title: "Equipe do treinador: trocar, recolher", onclick: () => openTrainer(s.trainer, state.attackerId) }, must ? "Escolher quem entra" : "Trocar"));
+}
+
 function oaBlock() {
   const sheet = getSheet(state.item);
   const oa = sheet.battle?.oa;
@@ -630,6 +643,7 @@ function render() {
     hpBlock(pkmn),
     initiativeBlock(pkmn),
     oaBlock(),
+    switchBlock(),
     moveBlock(),
     actionsBlock(),
     waitingBlock(),

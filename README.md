@@ -77,6 +77,33 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **🤼 Agarrar (ação, pág. 54):** FOR (Atletismo) contra FOR (Atletismo) ou DES (Acrobacia) do alvo, o melhor.
   Alvo até uma categoria maior, ao alcance; Fantasma só por Fantasma/Sombrio. Agarrado = deslocamento 0.
   O agarrado usa *Escapar* (ação, teste resistido); quem agarra usa *Soltar* (livre).
+- **Treinadores (até 6 Pokémon):** botão direito num token sem ficha → **Tornar treinador**. O jogador vira dono
+  (equipe Jogadores); o mestre pode trocar dono e equipe no painel.
+  - **Guardar:** com os Pokémon já fora da pokébola (token com ficha), selecione o treinador junto com eles →
+    **Guardar no treinador**, ou no painel → *Guardar os selecionados*. O treinador "absorve" token e ficha: o token
+    fica invisível debaixo dele (jogadores não veem; o mestre vê um ícone pequeno e transparente). Não apague o
+    token do treinador com Pokémon guardados.
+  - **Equipe do treinador** (botão direito no treinador, ou *Trocar* na ficha rápida do Pokémon): HP, condições e
+    onde cada um está; *Liberar* (aparece a até 4,5 m do treinador), *Recolher* (treinador a até 18 m),
+    *Trocar*, *Desvincular*. Só o dono e o mestre veem.
+  - **Troca (pág. 50):** no turno do Pokémon, gastando a ação; quem entra fica no mesmo lugar e na mesma posição da
+    iniciativa, com só ação bônus e reação, e rola a própria iniciativa no começo da próxima rodada. Desmaiado: troca
+    livre, e o novo entra na iniciativa na rodada seguinte. Liberar um Pokémon no meio do combate também o faz entrar
+    na rodada seguinte.
+  - **Ao voltar pra pokébola:** estágios, concentração (cargas), proteções e prisões acabam; condições continuam.
+    Natural Cure cura as condições; Regenerator recupera 1,5 × nível (mín. 3) em combate.
+  - **Ao entrar:** Intimidate (inimigos a 9 m, TR de SAB ou Ataque −1; Guard Dog sobe +1), Intrepid Sword,
+    Dauntless Shield, Supersweet Syrup e Hospitality são automáticos; clima/terreno (Drizzle, Electric Surge...) e
+    outras (Download, Trace...) avisam no registro.
+  - **Forçam troca:** Dragon Tail e Circle Throw (no acerto, sorteia quem entra), Roar (disputa) e Whirlwind (TR
+    falho), em que o treinador escolhe na ficha rápida. Guard Dog e Suction Cups (e Wind Rider contra Whirlwind)
+    impedem. Pokémon selvagem: aviso de fuga.
+  - **Trocam o usuário (ação livre):** U-turn, Volt Switch, Flip Turn, Parting Shot, Baton Pass (passa os estágios),
+    Chilly Reception, Shed Tail: a ficha rápida pede pra escolher quem entra.
+  - **Prendem (sem troca voluntária):** Mean Look, Block, Spider Web, Spirit Shackle, Anchor Shot, Thousand Waves,
+    Jaw Lock (os dois), Octolock, Snap Trap, Thunder Cage, Fairy Lock (até a próxima rodada), Ingrain, No Retreat;
+    habilidades Shadow Tag (18 m), Arena Trap (15 m, quem está no chão) e Magnet Pull (Aço, 18 m). Fantasmas escapam
+    de Mean Look, Block, Fairy Lock e das habilidades. Trocas forçadas e Moves de troca passam por cima.
 - **Defesas por reação (Protect e parecidos):** quando um Pokémon de outra equipe usa um Move, antes de qualquer
   rolagem a extensão vê quem pode reagir e abre na tela do dono (ou do mestre, se o Pokémon for dele ou o dono não
   estiver na sala) um popup com **5 segundos**. Só aparece pra quem tem o Move, PP, reação livre e não está
@@ -151,8 +178,9 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Equipes e donos:** cada ficha tem uma equipe (Jogadores, Inimigos ou Neutros) e um dono. Jogador que importa
   vira dono e entra em Jogadores; o mestre escolhe a equipe na importação e pode trocar equipe e dono na ficha
   completa. Cada jogador só usa os próprios Pokémon (ficha rápida e Moves).
-- **O que os jogadores veem:** dos Pokémon de outra equipe, só nome, tipo, barra de HP (sem números), condições e
-  buffs/debuffs. A CA e o HP dos inimigos somem do registro, das notificações e da lista de alvos. O mestre vê tudo.
+- **O que os jogadores veem:** a ficha completa só dos **próprios** Pokémon. Dos outros (inimigos e Pokémon de
+  outros treinadores), só nome, tipo, barra de HP (sem números), condições e buffs/debuffs. A CA e o HP somem do
+  registro, das notificações e da lista de alvos. O mestre vê tudo.
 - **Token:** barra de HP embaixo de todo Pokémon com ficha, etiqueta com condições e estágios (▲ Atq +2, ▼ Def −1),
   cinza quando desmaia. Pokémon desmaiado sai da iniciativa do Pretty Sordid (se era a vez dele, passa pro próximo).
 - **Mudanças de Status (📊):** popup igual ao do app, com os 8 estágios (−6 a +6) e o efeito de cada um, mais os

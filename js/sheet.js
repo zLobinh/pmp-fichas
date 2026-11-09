@@ -1,14 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.2";
-import { getRoller } from "./dice.js?v=0.9.2";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.2";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.2";
-import { openStages } from "./ui.js?v=0.9.2";
-import { TurnError } from "./combat.js?v=0.9.2";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.2";
-import { useMove, describe, seesTarget } from "./combat.js?v=0.9.2";
-import { TYPE_COLOR, die } from "./ui.js?v=0.9.2";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.2";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.3";
+import { getRoller } from "./dice.js?v=0.9.3";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.3";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.3";
+import { openStages } from "./ui.js?v=0.9.3";
+import { TurnError } from "./combat.js?v=0.9.3";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.3";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.9.3";
+import { TYPE_COLOR, die } from "./ui.js?v=0.9.3";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.3";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 

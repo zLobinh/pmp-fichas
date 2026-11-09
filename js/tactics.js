@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.2";
-import { d, fmtM } from "./rules.js?v=0.9.2";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.9.2";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.2";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.3";
+import { d, fmtM } from "./rules.js?v=0.9.3";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.9.3";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.3";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -342,7 +342,8 @@ export function watchMovement(rules) {
   const tick = async () => {
     {
       const settings = await getSettings();
-      const all = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] != null);
+      // (Pokémon in a pokéball don't move or fall)
+      const all = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] != null && !i.metadata[SHEET_KEY].ball);
       const running = (await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY]?.active === true)).length > 0;
       for (const t of all) {
         const s = getSheet(t);

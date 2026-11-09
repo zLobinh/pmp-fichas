@@ -1,13 +1,14 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.2";
-import { describe } from "./combat.js?v=0.9.2";
-import { openSheet, openHud, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.2";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.2";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.2";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.2";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.2";
-import { runPrepared } from "./prepared.js?v=0.9.2";
-import { loadRules } from "./store.js?v=0.9.2";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.3";
+import { describe } from "./combat.js?v=0.9.3";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.3";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.3";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.3";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.3";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.3";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.3";
+import { runPrepared } from "./prepared.js?v=0.9.3";
+import { loadRules } from "./store.js?v=0.9.3";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -74,6 +75,53 @@ OBR.onReady(() => {
       }),
   });
 
+  // ---- trainers (trainer.js): a token that carries up to 6 Pokémon
+  OBR.contextMenu.create({
+    id: `${ID}/make-trainer`,
+    icons: [{
+      icon: asset("icons/pokeball.svg"),
+      label: "Tornar treinador",
+      filter: { max: 1, every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined }, { key: ["metadata", TRAINER], value: undefined }] },
+    }],
+    onClick: async (context) => {
+      const item = context.items[0];
+      const gm = (await OBR.player.getRole()) === "GM";
+      await makeTrainer(item, { owner: OBR.player.id, team: gm ? "inimigos" : "jogadores" });
+      openTrainer(item.id);
+    },
+  });
+  OBR.contextMenu.create({
+    id: `${ID}/trainer-team`,
+    icons: [{
+      icon: asset("icons/pokeball.svg"),
+      label: "Equipe do treinador",
+      filter: { max: 1, every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", TRAINER], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      if (!(await canManage(context.items[0]))) return OBR.notification.show("Só o dono deste treinador (e o mestre) vê a equipe.", "WARNING");
+      openTrainer(context.items[0].id);
+    },
+  });
+  OBR.contextMenu.create({
+    id: `${ID}/trainer-absorb`,
+    icons: [{
+      icon: asset("icons/pokeball.svg"),
+      label: "Guardar no treinador",
+      filter: { min: 2, some: [{ key: ["metadata", TRAINER], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      const trainers = context.items.filter((i) => trainerOf(i));
+      if (trainers.length !== 1) return OBR.notification.show("Selecione um treinador só, junto com os Pokémon.", "WARNING");
+      if (!(await canManage(trainers[0]))) return OBR.notification.show("Esse treinador não é seu.", "WARNING");
+      try {
+        await link(await loadRules(), trainers[0], context.items.filter((i) => getSheet(i)));
+        openTrainer(trainers[0].id);
+      } catch (e) {
+        OBR.notification.show(e.message, "ERROR");
+      }
+    },
+  });
+
   OBR.player.onChange((player) => onSelection(player.selection));
   OBR.broadcast.onMessage(`${ID}/hud-closed`, () => markHudAlive(false));
 
@@ -93,7 +141,7 @@ OBR.onReady(() => {
     if (role !== "GM") return;
     const rules = await loadRules();
     const start = () => {
-      watchTurns(rules, { onTurnStart: (item) => runPrepared(rules, item) });
+      watchTurns(rules, { onTurnStart: (item) => runPrepared(rules, item), onNewRound: () => rollPending(rules) });
       watchMarks(rules);
       watchMovement(rules);
     };

@@ -4,20 +4,21 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.2";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.2";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.2";
-import { getRoller } from "./dice.js?v=0.9.2";
-import { defenses, endure } from "./protect.js?v=0.9.2";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.3";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.3";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.3";
+import { getRoller } from "./dice.js?v=0.9.3";
+import { defenses, endure } from "./protect.js?v=0.9.3";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.3";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.2";
+} from "./battle.js?v=0.9.3";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.2";
+} from "./tactics.js?v=0.9.3";
 
 export { TurnError };
 
@@ -627,6 +628,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     }
   }
 
+  // switching and trapping moves (trainer.js): Dragon Tail, Roar, U-turn, Mean Look...
+  await switchEffects(rules, { attackerItem, moveName, targetItems, entry });
   await pushLog(entry);
   if (settings.mapFx) await sendFx(attackerItem, entry, targetItems).catch(() => {});
   // Sentinela nearby: attacking someone else gives them a reaction attack
@@ -795,6 +798,58 @@ export async function releaseGrapple(item) {
   await updateSheet(item.id, (s) => { delete s.battle.grabbing; });
   await updateSheet(id, (s) => { if (s.battle.cond?.Grappled?.by === item.id) delete s.battle.cond.Grappled; });
   await pushLog({ kind: "note", attacker: item.name, text: "soltou o agarrão" });
+}
+
+// After the move: forced switches, traps and the user's own switch, from trainer.js's tables.
+// The log entry is pushed after this, so the notes land in it.
+async function switchEffects(rules, { attackerItem, moveName, targetItems, entry }) {
+  const force = FORCE[moveName], self = SELF_SWITCH[moveName], trapRule = TRAPS[moveName];
+  if (!force && !self && !trapRule) return;
+  const resultOf = (t) => entry.results.find((x) => x.targetId === t.id);
+  const fresh = async (id) => (await OBR.scene.items.getItems([id]))[0];
+  try {
+    if (force) {
+      for (const t0 of targetItems) {
+        const r = resultOf(t0);
+        if (!happened(force.when, r)) continue;
+        const t = await fresh(t0.id);
+        const ts = getSheet(t);
+        if (!ts || ts.pkmn.hp.current <= 0) continue;
+        const ab = rules.abilities(ts.pkmn);
+        if (force.wind && ab.includes("Wind Rider")) { r.effects.push("Wind Rider: não sai"); continue; }
+        if (force.pick === "random") { r.effects.push(await forceRandomSwitch(rules, t, moveName)); continue; }
+        // Roar / Whirlwind: the trainer chooses who comes in
+        if (!ts.trainer) { r.effects.push(`selvagem: foge se o nível dele for ${moveName === "Roar" ? "igual ou " : ""}menor`); continue; }
+        if (ab.includes("Guard Dog") || ab.includes("Suction Cups")) { r.effects.push("não pode ser forçado a sair"); continue; }
+        if (!(await bench(ts.trainer)).length) {
+          r.effects.push(moveName === "Roar" ? "sem com quem trocar: fica Amedrontado e usa a ação pra se afastar" : "sem com quem trocar: o Move falha");
+          continue;
+        }
+        await updateSheet(t.id, (s) => { s.battle.mustSwitch = { forced: true, by: moveName }; });
+        r.effects.push("tem que ser trocado (o treinador escolhe na ficha rápida)");
+      }
+    }
+    if (trapRule) {
+      const hit = targetItems.filter((t) => happened(trapRule.when, resultOf(t)));
+      const who = trapRule.who === "self" ? [attackerItem]
+        : trapRule.who === "both" ? (hit.length ? [attackerItem, ...hit] : [])
+        : trapRule.when === "used" ? targetItems : hit;
+      const names = await trap(rules, moveName, attackerItem, await Promise.all(who.map((w) => fresh(w.id))));
+      if (names.length) entry.notes.push(`preso (não pode ser trocado): ${names.join(", ")}`);
+    }
+    if (self) {
+      const any = self === "used" || targetItems.some((t) => happened(self, resultOf(t)));
+      const as = getSheet(await fresh(attackerItem.id));
+      if (any && as?.trainer && as.pkmn.hp.current > 0) {
+        if ((await bench(as.trainer)).length) {
+          await updateSheet(attackerItem.id, (s) => { s.battle.mustSwitch = { free: true, by: moveName, batonPass: moveName === "Baton Pass" }; });
+          entry.notes.push(`${attackerItem.name} volta pra pokébola: escolha quem entra (ação livre)`);
+        } else entry.notes.push("sem outro Pokémon pra entrar");
+      }
+    }
+  } catch (err) {
+    entry.notes.push(`troca: ${err.message}`);
+  }
 }
 
 // can this viewer see the AC/HP numbers of a result's target? (players don't see the enemies')

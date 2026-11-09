@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.2";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.3";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -72,6 +72,23 @@ export async function openSheet(itemId, anchorElementId) {
     anchorPosition: { left: width - 16, top: 70 },
     anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },
     transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+  });
+}
+
+// trainer's team panel, top-right (switchId: open already switching that Pokémon out)
+export const TRAINER_ID = `${ID}/trainer`;
+export async function openTrainer(trainerId, switchId = null) {
+  const width = await OBR.viewport.getWidth();
+  return OBR.popover.open({
+    id: TRAINER_ID,
+    url: asset(`trainer.html?id=${encodeURIComponent(trainerId)}${switchId ? `&switch=${encodeURIComponent(switchId)}` : ""}`),
+    width: 380,
+    height: 480,
+    anchorReference: "POSITION",
+    anchorPosition: { left: width - 16, top: 70 },
+    anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+    transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+    disableClickAway: true,
   });
 }
 

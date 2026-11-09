@@ -1,10 +1,10 @@
 // The "defend?" popup: opens on the screen of whoever controls a Pokémon that can react to an attack
 // (Protect, Wide Guard, Upper Hand, Endure...). 5 seconds to choose; time out = no defense.
 // The answer goes into the Pokémon's sheet (battle.defenseAnswer), where the attacker is waiting.
-import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.2";
-import { getRoller } from "./dice.js?v=0.9.2";
-import { useMove } from "./combat.js?v=0.9.2";
-import { DEFENSES, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.2";
+import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.3";
+import { getRoller } from "./dice.js?v=0.9.3";
+import { useMove } from "./combat.js?v=0.9.3";
+import { DEFENSES, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.3";
 
 const params = new URLSearchParams(location.search);
 const pid = params.get("id");

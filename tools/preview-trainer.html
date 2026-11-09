@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prévia do painel do treinador</title>
+    <!-- swaps the real Owlbear SDK for the in-memory mock -->
+    <script type="importmap">
+      { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js?v=8" } }
+    </script>
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>body { width: 380px; border: 1px dashed #555; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Squirtle ("c", no sheet) is a trainer carrying Bulbasaur (out) and Oddish (in the ball) -->
+    <script type="module">
+      await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm"); // the mock
+      const items = window.__mock.items;
+      const c = items.find((i) => i.id === "c");
+      c.metadata["com.pmp-fichas/trainer"] = { owner: "me", team: "jogadores" };
+      const a = items.find((i) => i.id === "a"), d = items.find((i) => i.id === "d");
+      Object.assign(a.metadata["com.pmp-fichas/sheet"], { trainer: "c", slot: 0 });
+      Object.assign(d.metadata["com.pmp-fichas/sheet"], { trainer: "c", slot: 1, ball: { scale: { x: 1, y: 1 } } });
+      d.visible = false;
+      a.metadata["com.pmp-fichas/sheet"].battle = { cond: { Burning: { since: 0, age: 0 } } };
+      await import("../js/trainer-ui.js");
+    </script>
+  </body>
+</html>

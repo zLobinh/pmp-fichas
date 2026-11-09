@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.2";
-import { d } from "./rules.js?v=0.9.2";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.3";
+import { d } from "./rules.js?v=0.9.3";
 
 // ------------------------------------------------------------------ conditions
 
@@ -539,7 +539,8 @@ export async function endCombat(items) {
 // Runs the end/start of turn once for the current Pretty Sordid state. Called by the GM's watcher
 // and right after "Passar turno" by whoever pressed it (so it doesn't depend on the GM's browser).
 // Whoever writes the scene's turn key last does the work; the others back off.
-export async function processTurn(rules, { onTurnStart } = {}) {
+// onNewRound(): runs when the round changes (Pokémon that came in by a switch roll initiative)
+export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
   const items = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null);
   const active = items.find(isActive);
   const meta = await OBR.scene.getMetadata();
@@ -561,7 +562,13 @@ export async function processTurn(rules, { onTurnStart } = {}) {
         const notes = await endTurn(rules, byId.get(prev.activeId));
         if (notes.length) log.push(`Fim do turno de ${byId.get(prev.activeId).name}: ${notes.join("; ")}`);
       }
-      if (prev.round != null && round !== prev.round) await newRound(sheets);
+      if (prev.round != null && round !== prev.round) {
+        await newRound(sheets);
+        if (onNewRound) {
+          try { await onNewRound(); }
+          catch (e) { await pushLog({ kind: "note", attacker: "Combate", text: `Iniciativa de quem entrou na troca: ${e.message}` }); }
+        }
+      }
       if (byId.has(active.id)) {
         const notes = await startTurn(rules, (await OBR.scene.items.getItems([active.id]))[0]);
         log.push(`Turno de ${active.name}${notes.length ? `: ${notes.join("; ")}` : ""}`);
@@ -615,8 +622,9 @@ export function guardedLoop(name, run, { delay = 350, timeout = 20000 } = {}) {
 }
 
 // watches Pretty Sordid and runs the turn hooks once (GM only)
-export function watchTurns(rules, { onTurnStart } = {}) {
-  const schedule = guardedLoop("turnos", () => processTurn(rules, { onTurnStart }));
+export function watchTurns(rules, { onTurnStart, onNewRound } = {}) {
+  // (rolling several initiatives with Dice+ takes a while)
+  const schedule = guardedLoop("turnos", () => processTurn(rules, { onTurnStart, onNewRound }), { timeout: 60000 });
   OBR.scene.items.onChange(schedule);
   OBR.scene.onMetadataChange(schedule);
   OBR.scene.onReadyChange((ready) => { if (ready) schedule(); });
@@ -630,7 +638,8 @@ export const teamOf = (sheet) => sheet?.team ?? "inimigos";
 export const allies = (a, b) => teamOf(a) === teamOf(b);
 
 // full sheet (HP numbers, AC, moves) for: the GM, the owner, and the players' own team
-export const canSeeFull = (sheet, viewer) => viewer.role === "GM" || sheet?.owner === viewer.id || teamOf(sheet) === "jogadores";
+// (players don't see the sheets of other players' Pokémon either: only their own)
+export const canSeeFull = (sheet, viewer) => viewer.role === "GM" || sheet?.owner === viewer.id;
 
 // ------------------------------------------------------------------ damage points (pág. 57-58), like the app
 
@@ -739,7 +748,8 @@ export function watchMarks(rules) {
     {
       const all = await OBR.scene.items.getItems();
       const marks = all.filter((i) => i.metadata?.[MARK]);
-      const tokens = all.filter((i) => i.metadata?.[SHEET_KEY]);
+      // (Pokémon in a trainer's pokéball have no marks)
+      const tokens = all.filter((i) => i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball);
       const dpi = await OBR.scene.grid.getDpi();
       const want = [];
       for (const t of tokens) {

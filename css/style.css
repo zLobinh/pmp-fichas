@@ -193,3 +193,11 @@ body.defend-body { background: var(--panel, #1e2231); }
 .defend-bar i { display: block; height: 100%; background: var(--warn, #f0b03f); transition: width .2s linear; }
 .defend-opts { display: flex; flex-direction: column; gap: 5px; }
 .defend-opts button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 1px; }
+
+/* trainer panel */
+.trainer { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.tslot { display: flex; gap: 8px; align-items: flex-start; padding: 6px; border-radius: 8px; background: var(--panel-2, rgba(127,127,127,.12)); }
+.tslot img { width: 44px; height: 44px; object-fit: contain; image-rendering: pixelated; flex: none; }
+.tslot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tslot.fainted { opacity: .55; }
+.tslot.leaving { outline: 2px solid var(--warn, #f0b03f); }
