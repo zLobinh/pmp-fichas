@@ -14,10 +14,10 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.3";
-import { d, fmtM } from "./rules.js?v=0.9.3";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.3";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.3";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.4";
+import { d, fmtM } from "./rules.js?v=0.9.4";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.4";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.4";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;

@@ -195,6 +195,16 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
 - **Painel (ícone da pokébola):** Pokémon da cena, registro de rolagens da mesa e configurações do mestre,
   incluindo *Encerrar combate* (zera estágios e ações, tira condições voláteis, Gravemente Envenenado vira Envenenado).
 - Todo mundo na sala recebe uma notificação de cada rolagem.
+- **Atalhos com vários tokens selecionados (botão direito):** *Iniciar combate* (mestre) rola a iniciativa de
+  todos e, sem combate rodando, começa a rodada 1 com o primeiro da ordem (avisa se estão todos na mesma equipe);
+  *Recolher nos treinadores* guarda cada Pokémon na pokébola do próprio treinador.
+- **Desmaiado volta pra pokébola sozinho** quando o treinador está a até 18 m (opção nas configurações). Em
+  combate, o painel do treinador abre pro dono escolher quem entra.
+- **Trainer Card:** o painel do treinador virou um cartão com os 6 Pokémon em molduras, a arte do token do
+  treinador, 8 insígnias (o mestre clica pra marcar) e o botão *Descanso longo* (equipe toda, fora do combate).
+- **Talentos e habilidades** na ficha completa (clique pra ver a descrição) e os talentos na ficha rápida.
+- **Equipes:** passar um Pokémon ou treinador pra um jogador já coloca na equipe Jogadores. Protect e ataque de
+  oportunidade só valem entre equipes diferentes (o Protect também vale contra Move de dano de aliado).
 
 A ficha fica guardada no próprio token, então todo mundo vê a mesma coisa. Os jogadores só editam as fichas que eles importaram; o mestre edita todas.
 

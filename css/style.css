@@ -194,10 +194,92 @@ body.defend-body { background: var(--panel, #1e2231); }
 .defend-opts { display: flex; flex-direction: column; gap: 5px; }
 .defend-opts button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 1px; }
 
-/* trainer panel */
-.trainer { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-.tslot { display: flex; gap: 8px; align-items: flex-start; padding: 6px; border-radius: 8px; background: var(--panel-2, rgba(127,127,127,.12)); }
-.tslot img { width: 44px; height: 44px; object-fit: contain; image-rendering: pixelated; flex: none; }
-.tslot-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.tslot.fainted { opacity: .55; }
-.tslot.leaving { outline: 2px solid var(--warn, #f0b03f); }
+/* abilities and feats on the sheet */
+.chip.trait { cursor: pointer; }
+.trait-text { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--accent); background: var(--panel-2); border-radius: 4px; white-space: pre-line; }
+.hud-feats { margin: 2px 0 4px; }
+.hud-feats span[title]:not([title=""]) { cursor: help; text-decoration: underline dotted; }
+
+/* trainer panel: the "Trainer Card" (always dark, like the card) */
+body:has(.tcard) { background: transparent; }
+.tcard {
+  --gold: #c9a35a; --wood: #7a4a24; --wood-2: #a8703c; --tc-text: #f1f1f1; --tc-muted: #b9b9c2;
+  margin: 4px; padding: 0 0 10px; color: var(--tc-text);
+  background: linear-gradient(160deg, #4a4c52 0%, #2d2e33 55%, #232428 100%);
+  border: 2px solid var(--gold); border-radius: 12px; box-shadow: 0 0 0 1px #000 inset, 0 6px 18px rgba(0,0,0,.45);
+  overflow: hidden; display: flex; flex-direction: column; gap: 8px;
+}
+.tcard .tc-muted { color: var(--tc-muted); }
+.tc-head { position: relative; display: flex; align-items: stretch; height: 46px; }
+.tc-title {
+  background: #0d0d0f; color: #fff; font-weight: 800; font-size: 24px; letter-spacing: .5px; font-style: italic;
+  padding: 6px 34px 6px 14px; clip-path: polygon(0 0, 100% 0, calc(100% - 26px) 100%, 0 100%);
+  display: flex; align-items: center; text-shadow: 0 2px 0 #000;
+}
+.tc-trainer-name {
+  margin-left: auto; align-self: center; margin-right: 38px; max-width: 46%;
+  background: linear-gradient(90deg, rgba(0,0,0,0), #151518 18%); color: #ffd84a; font-weight: 800; font-size: 18px;
+  padding: 5px 14px 5px 30px; clip-path: polygon(18px 0, 100% 0, 100% 100%, 0 100%);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 0 #000;
+}
+.tc-close { position: absolute; right: 6px; top: 8px; color: #ddd; }
+.tc-sub { display: flex; gap: 8px; align-items: center; padding: 0 12px; font-size: 11px; color: var(--tc-muted); }
+.tc-team { padding: 1px 8px; border-radius: 999px; border: 1px solid #666; }
+.tc-team.jogadores { border-color: #4aa3df; color: #8fcaf2; }
+.tc-team.inimigos { border-color: #e3504f; color: #f29b9a; }
+.tc-owner { padding: 0 12px; gap: 6px; color: var(--tc-muted); }
+.tc-owner select { font-size: 11px; }
+.tc-switch { margin: 0 12px; padding: 7px 9px; border: 1px solid #ffd84a; border-radius: 8px; background: rgba(255,216,74,.08); display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.tc-msg { margin: 0 12px; color: #ff9c9c; }
+.tc-body { display: flex; gap: 10px; padding: 0 12px; align-items: stretch; }
+.tc-grid { flex: none; display: grid; grid-template-columns: repeat(3, 100px); gap: 8px; }
+.tc-slot {
+  position: relative; width: 100px; height: 112px; border-radius: 8px; cursor: pointer;
+  background: linear-gradient(180deg, var(--wood-2), var(--wood)); padding: 4px; box-shadow: 0 2px 0 #3d230e, inset 0 0 0 1px #c88d52;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.tc-slot.empty { cursor: default; opacity: .7; }
+.tc-ball {
+  position: relative; flex: 1; border-radius: 5px; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #f6d3da 0 45%, #6b4a3a 45% 52%, #fbf7f7 52% 100%);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
+}
+.tc-ball::before { /* the button in the middle of the pokéball */
+  content: ""; position: absolute; left: 50%; top: 48.5%; width: 26px; height: 26px; transform: translate(-50%, -50%);
+  border-radius: 50%; background: #fbf7f7; border: 5px solid #6b4a3a; box-sizing: border-box; opacity: .55;
+}
+.tc-ball img { position: relative; max-width: 86%; max-height: 86%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 2px 1px rgba(0,0,0,.35)); }
+.tc-name { font-size: 11px; font-weight: 700; color: #fff; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 0 #000; }
+.tc-hp { height: 5px; border-radius: 3px; background: #1b1d27; overflow: hidden; }
+.tc-hp i { display: block; height: 100%; background: #46c37b; }
+.tc-hp i.low { background: #f0b03f; }
+.tc-hp i.crit { background: #ef5d5d; }
+.tc-lv { position: absolute; left: 7px; top: 6px; font-size: 9px; font-weight: 700; color: #3b2a22; background: rgba(255,255,255,.75); border-radius: 3px; padding: 0 3px; }
+.tc-where { position: absolute; right: 6px; top: 6px; font-size: 9px; font-weight: 700; color: #fff; background: #2e9e5b; border-radius: 3px; padding: 0 4px; }
+.tc-where.down { background: #a33; }
+.tc-cond { position: absolute; left: 7px; bottom: 26px; font-size: 11px; }
+.tc-slot.fainted .tc-ball img { filter: grayscale(1) brightness(.7); }
+.tc-slot.out { box-shadow: 0 2px 0 #3d230e, inset 0 0 0 1px #c88d52, 0 0 0 2px #2e9e5b; }
+.tc-slot.sel { box-shadow: 0 2px 0 #3d230e, inset 0 0 0 1px #c88d52, 0 0 0 2px #ffd84a; }
+.tc-slot.leaving { box-shadow: 0 0 0 2px #f0b03f, 0 0 12px #f0b03f; }
+.tc-slot.can-enter { animation: tc-pulse 1.2s ease-in-out infinite; }
+@keyframes tc-pulse { 50% { box-shadow: 0 2px 0 #3d230e, 0 0 0 2px #ffd84a, 0 0 10px #ffd84a; } }
+.tc-art { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }
+.tc-art img { width: 100%; height: 232px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 4px 6px rgba(0,0,0,.5)); }
+.tc-detail { margin: 0 12px; padding: 7px 9px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid #55565c; display: flex; flex-direction: column; gap: 4px; }
+.tc-badges { margin: 0 12px; padding: 6px 10px; background: #141416; border-radius: 6px; border: 1px solid #000; display: flex; align-items: center; gap: 10px; }
+.tc-badges-title { font-weight: 800; font-size: 13px; letter-spacing: 1px; color: #fff; font-style: italic; }
+.tc-badge-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.tc-badge {
+  width: 30px; height: 30px; border-radius: 5px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, var(--wood-2), var(--wood)); box-shadow: inset 0 0 0 1px #c88d52;
+}
+.tc-badge i { width: 18px; height: 18px; background: #2a2a2e; clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%); }
+.tc-badge.on i { background: radial-gradient(circle at 35% 30%, #fff 0 12%, var(--badge) 40%, color-mix(in srgb, var(--badge) 60%, #000) 100%); }
+.tc-actions { display: flex; gap: 6px; align-items: center; padding: 0 12px; flex-wrap: wrap; }
+.tcard button { font-size: 12px; }
+@media (max-width: 520px) {
+  .tc-grid { grid-template-columns: repeat(3, 1fr); flex: 1; }
+  .tc-slot { width: auto; }
+  .tc-art { display: none; }
+}

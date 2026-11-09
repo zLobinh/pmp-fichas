@@ -10,10 +10,10 @@
 //   3. no answer in time = no defense.
 // Defending costs the reaction, the action of the next turn and 1 PP. Used in a row (the round
 // before), the book's rule: 1d6 per consecutive success (max 6d6), all of them 5 or 6.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.3";
-import { fmtM } from "./rules.js?v=0.9.3";
-import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.3";
-import { distanceMeters } from "./map.js?v=0.9.3";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.4";
+import { fmtM } from "./rules.js?v=0.9.4";
+import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.4";
+import { distanceMeters } from "./map.js?v=0.9.4";
 
 // kind: what the protection covers
 //   single       any single-target move aimed at the user
@@ -147,17 +147,21 @@ async function ask(asks, attackerItem, moveLabel) {
 export async function defenses(rules, { attackerItem, move, raw, targets, area }) {
   const out = { blocked: [], canceled: null, notes: [] };
   const aSheet = getSheet(attackerItem);
-  const hostile = targets.filter((t) => getSheet(t) && !allies(aSheet, getSheet(t)));
-  if (!hostile.length) return out;
   const mp = moveProfile(rules, move, raw, targets, area);
-  const others = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] && inInitiative(i));
-  const team = (t) => others.filter((o) => o.id === t.id || allies(getSheet(o), getSheet(t)));
+  // an enemy's move, or a damaging move from anyone (a friendly hit, or teams not set up yet)
+  const hostile = targets.filter((t) => getSheet(t) && t.id !== attackerItem.id && (!allies(aSheet, getSheet(t)) || mp.damaging));
+  if (!hostile.length) return out;
+  const round = await roundNow();
+  // everyone on the field (also who just came in by a switch and is waiting for the initiative)
+  const others = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball && (inInitiative(i) || i.metadata[SHEET_KEY].battle?.joinNextRound));
+  const team = (t) => others.filter((o) => o.id !== attackerItem.id && (o.id === t.id || allies(getSheet(o), getSheet(t))));
 
-  // 1) protections already up
+  // 1) protections already up (one from before the last round is a leftover: gone)
   const covered = new Map(); // targetId -> { by, move }
   for (const t of hostile) {
     for (const P of team(t)) {
       const prot = getSheet(P).battle?.protection;
+      if (prot && prot.round != null && prot.round < round - 1) continue;
       if (prot && await covers(prot, P, t, mp)) { covered.set(t.id, { by: P, move: prot.move }); break; }
     }
   }
@@ -179,6 +183,16 @@ export async function defenses(rules, { attackerItem, move, raw, targets, area }
   }
   const asks = [...byP.values()].map((e) => ({ P: e.P, options: [...e.options], targets: e.targets, kind: "guard" }));
   if (asks.length) out.notes.push(`esperou a reação de ${asks.map((a) => a.P.name).join(", ")}`);
+  // why a target that knows Protect was not asked (the book: Protect only covers single-target moves)
+  for (const t of hostile) {
+    if (covered.has(t.id) || byP.has(t.id)) continue;
+    const ts = getSheet(t);
+    const known = Object.keys(DEFENSES).filter((n) => ts.pkmn.moves?.[n] && ["single", "singleDamage"].includes(DEFENSES[n].kind));
+    if (!known.length) continue;
+    const e = econOf(ts);
+    const why = mp.multi ? "o move tem vários alvos (só Wide Guard protege)" : !e.reaction ? "já usou a reação" : e.loseAction ? "já adiantou a ação do próximo turno" : null;
+    if (why) out.notes.push(`${t.name} não pôde usar ${known.join("/")}: ${why}`);
+  }
   const answers = await ask(asks, attackerItem, move.label.replace(/ PMP$/, ""));
 
   // 3) the answers: new protections and Upper Hand

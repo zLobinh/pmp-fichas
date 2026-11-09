@@ -44,6 +44,10 @@ def main():
     rules = {
         "leveling": load(app / "assets" / "datafiles" / "leveling.json"),
         "natures": load(app / "assets" / "datafiles" / "natures.json"),
+        # descriptions shown on the sheet (talentos and habilidades)
+        "feats": {k: v.get("Description", "") for k, v in load(app / "assets" / "datafiles" / "feats.json").items()},
+        "abilities": {k: (v.get("Description", "") if isinstance(v, dict) else str(v))
+                      for k, v in load(data / "abilities.json").items()},
     }
 
     for name, obj in (("moves", moves), ("pokemon", pokemon), ("rules", rules)):

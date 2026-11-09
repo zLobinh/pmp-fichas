@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.3";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.4";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -82,8 +82,8 @@ export async function openTrainer(trainerId, switchId = null) {
   return OBR.popover.open({
     id: TRAINER_ID,
     url: asset(`trainer.html?id=${encodeURIComponent(trainerId)}${switchId ? `&switch=${encodeURIComponent(switchId)}` : ""}`),
-    width: 380,
-    height: 480,
+    width: 560,
+    height: 520,
     anchorReference: "POSITION",
     anchorPosition: { left: width - 16, top: 70 },
     anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },

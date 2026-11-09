@@ -1,14 +1,15 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.3";
-import { describe } from "./combat.js?v=0.9.3";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.3";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.3";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.3";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.3";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.3";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.3";
-import { runPrepared } from "./prepared.js?v=0.9.3";
-import { loadRules } from "./store.js?v=0.9.3";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.4";
+import { describe } from "./combat.js?v=0.9.4";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.4";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.4";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.4";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.4";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.4";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.4";
+import { runPrepared } from "./prepared.js?v=0.9.4";
+import { loadRules } from "./store.js?v=0.9.4";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.4";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -122,6 +123,36 @@ OBR.onReady(() => {
     },
   });
 
+  // ---- shortcuts (qol.js) for several tokens at once
+  OBR.contextMenu.create({
+    id: `${ID}/start-combat`,
+    icons: [{
+      icon: asset("icons/area.svg"),
+      label: "Iniciar combate (rola a iniciativa de todos)",
+      filter: { roles: ["GM"], every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      try {
+        const warn = await startCombat(await loadRules(), context.items);
+        if (warn) OBR.notification.show(warn, "WARNING");
+      } catch (e) { OBR.notification.show(e.message, "ERROR"); }
+    },
+  });
+  OBR.contextMenu.create({
+    id: `${ID}/send-trainers`,
+    icons: [{
+      icon: asset("icons/pokeball.svg"),
+      label: "Recolher nos treinadores",
+      filter: { every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY, "trainer"], value: undefined, operator: "!=" }, { key: ["metadata", SHEET_KEY, "ball"], value: undefined }] },
+    }],
+    onClick: async (context) => {
+      try {
+        const { done, skipped } = await sendToTrainers(await loadRules(), context.items);
+        OBR.notification.show(`${done.length ? `Recolhidos: ${done.join(", ")}` : "Ninguém recolhido"}${skipped.length ? ` · Ficaram: ${skipped.join(", ")}` : ""}`, skipped.length ? "WARNING" : "SUCCESS");
+      } catch (e) { OBR.notification.show(e.message, "ERROR"); }
+    },
+  });
+
   OBR.player.onChange((player) => onSelection(player.selection));
   OBR.broadcast.onMessage(`${ID}/hud-closed`, () => markHudAlive(false));
 
@@ -144,6 +175,7 @@ OBR.onReady(() => {
       watchTurns(rules, { onTurnStart: (item) => runPrepared(rules, item), onNewRound: () => rollPending(rules) });
       watchMarks(rules);
       watchMovement(rules);
+      watchFainted(rules);
     };
     if (await OBR.scene.isReady()) start();
     else {
@@ -155,15 +187,31 @@ OBR.onReady(() => {
   // (the GM answers for Pokémon whose owner is not a player in the room)
   // a defense request (Protect, Wide Guard, Endure...) for one of MY Pokémon: the 5-second popup,
   // at the top of the screen (the GM answers for Pokémon whose owner is not in the room)
+  // Requests already in the scene when this browser opened are old ones left behind. (Comparing
+  // `at` with this computer's clock dropped requests when the two computers' clocks disagreed by a
+  // few seconds: the popup never opened and the attack went on without asking.)
   const seenAsk = new Set();
+  const seenOa = new Map();
+  const seenChoose = new Map();
+  let baseline = null;
+  const takeBaseline = () => (baseline ??= (async () => {
+    for (const it of await OBR.scene.items.getItems((i) => !!i.metadata?.[SHEET_KEY] || !!i.metadata?.[TRAINER])) {
+      if (trainerOf(it)?.chooseIn) seenChoose.set(it.id, trainerOf(it).chooseIn.at);
+      const b = getSheet(it)?.battle;
+      if (b?.defenseAsk) seenAsk.add(b.defenseAsk.req + it.id);
+      if (b?.oa) seenOa.set(it.id, b.oa.at);
+    }
+  })().catch(() => {}));
+  OBR.scene.isReady().then((r) => { if (r) takeBaseline(); });
+  OBR.scene.onReadyChange((r) => { baseline = null; seenAsk.clear(); seenOa.clear(); if (r) takeBaseline(); });
   let defendSlot = 0;
   OBR.scene.items.onChange(async (items) => {
+    await takeBaseline();
     for (const it of items) {
       const s = getSheet(it);
       const ask = s?.battle?.defenseAsk;
       if (!ask || seenAsk.has(ask.req + it.id)) continue;
       seenAsk.add(ask.req + it.id);
-      if (Date.now() - ask.at > 8000) continue; // an old one left behind
       const players = await OBR.party.getPlayers().catch(() => []);
       const ownerHere = players.some((p) => p.id === s.owner);
       if (!(s.owner === viewer.id || (viewer.role === "GM" && !ownerHere))) continue;
@@ -183,14 +231,28 @@ OBR.onReady(() => {
     }
   });
 
-  const seenOa = new Map();
+  // a fainted Pokémon went back to the ball in combat: its trainer's owner picks who comes in
   OBR.scene.items.onChange(async (items) => {
+    await takeBaseline();
+    for (const it of items) {
+      const c = trainerOf(it)?.chooseIn;
+      if (!c || seenChoose.get(it.id) === c.at) continue;
+      seenChoose.set(it.id, c.at);
+      const players = await OBR.party.getPlayers().catch(() => []);
+      const owner = trainerOf(it).owner;
+      if (!(owner === viewer.id || (viewer.role === "GM" && !players.some((p) => p.id === owner)))) continue;
+      OBR.notification.show(`${c.name} desmaiou e voltou pra pokébola: escolha quem entra (Liberar)`, "WARNING");
+      openTrainer(it.id);
+    }
+  });
+
+  OBR.scene.items.onChange(async (items) => {
+    await takeBaseline();
     for (const it of items) {
       const s = getSheet(it);
       const oa = s?.battle?.oa;
       if (!oa || seenOa.get(it.id) === oa.at) continue;
       seenOa.set(it.id, oa.at);
-      if (Date.now() - oa.at > 15000) continue;
       const players = await OBR.party.getPlayers().catch(() => []);
       const ownerHere = players.some((p) => p.id === s.owner);
       const mine = s.owner === viewer.id || (viewer.role === "GM" && !ownerHere);

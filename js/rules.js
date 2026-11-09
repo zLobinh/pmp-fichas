@@ -60,6 +60,8 @@ export class Rules {
     this.species = pokemon;
     this.leveling = rules.leveling;
     this.natures = rules.natures;
+    this.featText = rules.feats ?? {};
+    this.abilityText = rules.abilities ?? {};
   }
 
   // pokedex.get_pokemon: species data with the variant's overrides applied

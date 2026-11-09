@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.3";
-import { describe } from "./combat.js?v=0.9.3";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.9.3";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.3";
-import { dicePlusReady } from "./dice.js?v=0.9.3";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.3";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.4";
+import { describe } from "./combat.js?v=0.9.4";
+import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.9.4";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.4";
+import { dicePlusReady } from "./dice.js?v=0.9.4";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.4";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -69,6 +69,7 @@ function render() {
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoPP, onchange: (e) => setSettings({ autoPP: e.target.checked }) }), "Gastar 1 PP ao usar um Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.checkRange, onchange: (e) => setSettings({ checkRange: e.target.checked }) }), "Exigir que o alvo esteja no alcance do Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.moveControl, onchange: (e) => setSettings({ moveControl: e.target.checked }) }), "Controlar o deslocamento em combate (token volta se andar demais ou fora do turno)"),
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoRecall, onchange: (e) => setSettings({ autoRecall: e.target.checked }) }), "Pokémon desmaiado volta sozinho pra pokébola (treinador a até 18 m)"),
           watchLine(),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.mapFx, onchange: (e) => setSettings({ mapFx: e.target.checked }) }), "Animação no mapa (quem acertou quem)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.dicePlus, onchange: (e) => setSettings({ dicePlus: e.target.checked }) }),

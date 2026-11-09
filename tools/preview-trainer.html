@@ -8,7 +8,7 @@
       { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js?v=8" } }
     </script>
     <link rel="stylesheet" href="../css/style.css" />
-    <style>body { width: 380px; border: 1px dashed #555; }</style>
+    <style>body { width: 560px; border: 1px dashed #555; }</style>
   </head>
   <body>
     <div id="root"></div>
@@ -23,6 +23,10 @@
       Object.assign(d.metadata["com.pmp-fichas/sheet"], { trainer: "c", slot: 1, ball: { scale: { x: 1, y: 1 } } });
       d.visible = false;
       a.metadata["com.pmp-fichas/sheet"].battle = { cond: { Burning: { since: 0, age: 0 } } };
+      // sprites from the "Imagem por Link" repo, just to see the card
+      const sprite = (n) => ({ url: `https://zlobinh.github.io/mapas/pokemon/${n}.gif`, width: 96, height: 96, mime: "image/gif" });
+      a.image = sprite("0001_Bulbasaur"); d.image = sprite("0043_Oddish"); c.image = sprite("0007_Squirtle");
+      c.metadata["com.pmp-fichas/trainer"].badges = [true, true, false, true];
       await import("../js/trainer-ui.js");
     </script>
   </body>

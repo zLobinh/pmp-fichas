@@ -1,14 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.3";
-import { getRoller } from "./dice.js?v=0.9.3";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.3";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.3";
-import { openStages } from "./ui.js?v=0.9.3";
-import { TurnError } from "./combat.js?v=0.9.3";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.3";
-import { useMove, describe, seesTarget } from "./combat.js?v=0.9.3";
-import { TYPE_COLOR, die } from "./ui.js?v=0.9.3";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.3";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.4";
+import { getRoller } from "./dice.js?v=0.9.4";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.4";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.4";
+import { openStages } from "./ui.js?v=0.9.4";
+import { TurnError } from "./combat.js?v=0.9.4";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.4";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.9.4";
+import { TYPE_COLOR, die } from "./ui.js?v=0.9.4";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.4";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -73,6 +73,25 @@ function statsCard(pkmn) {
     h("div", { class: "muted small", style: "margin-top:6px" }, "Clique num atributo pra rolar o teste de resistência."));
 }
 
+// abilities and feats ("talentos") as chips; clicking one shows its description below
+function traitsBlock(pkmn) {
+  const { rules } = state;
+  const counts = new Map();
+  for (const f of rules.feats(pkmn)) counts.set(f, (counts.get(f) ?? 0) + 1);
+  const chip = (kind, name, label, text) => h("span", {
+    class: `chip trait ${state.openInfo === `${kind}:${name}` ? "on" : ""}`, title: text || "",
+    onclick: () => { state.openInfo = state.openInfo === `${kind}:${name}` ? null : `${kind}:${name}`; render(); },
+  }, label);
+  const open = state.openInfo?.split(":");
+  const text = open && (open[0] === "feat" ? rules.featText[open.slice(1).join(":")] : rules.abilityText[open.slice(1).join(":")]);
+  return h("div", { class: "traits" },
+    h("div", { class: "row small", style: "gap:4px;margin-top:6px" }, h("span", { class: "muted" }, "Habilidades:"),
+      rules.abilities(pkmn).length ? rules.abilities(pkmn).map((a) => chip("ab", a, a, rules.abilityText[a])) : h("span", { class: "muted" }, "—")),
+    h("div", { class: "row small", style: "gap:4px;margin-top:4px" }, h("span", { class: "muted" }, "Talentos:"),
+      counts.size ? [...counts].map(([f, n]) => chip("feat", f, n > 1 ? `${f} ×${n}` : f, rules.featText[f])) : h("span", { class: "muted" }, "nenhum")),
+    open ? h("div", { class: "trait-text small" }, h("b", {}, open.slice(1).join(":")), " — ", text || "Sem descrição nos dados do app.") : null);
+}
+
 function infoCard(pkmn) {
   const { rules } = state;
   const cond = conditionsOf(getSheet(state.item));
@@ -88,7 +107,7 @@ function infoCard(pkmn) {
   return h("div", { class: "card" },
     h("div", { class: "row" }, rules.types(pkmn).map(typeTag),
       h("span", { class: "muted small" }, `Natureza: ${pkmn.nature ?? "—"}`)),
-    h("div", { class: "small", style: "margin-top:6px" }, h("span", { class: "muted" }, "Habilidades: "), rules.abilities(pkmn).join(", ") || "—"),
+    traitsBlock(pkmn),
     pkmn.item ? h("div", { class: "small" }, h("span", { class: "muted" }, "Item: "), pkmn.item) : null,
     h("h2", { style: "margin-top:8px" }, "Condições de status"),
     h("div", { class: "row" },
@@ -125,7 +144,8 @@ function teamCard(sheet) {
       h("select", { onchange: (e) => set({ team: e.target.value }) },
         Object.entries(TEAMS).map(([k, label]) => { const o = h("option", { value: k }, label); if (teamOf(sheet) === k) o.selected = true; return o; }))),
     h("label", { class: "row" }, "Controlado por ",
-      h("select", { onchange: (e) => set({ owner: e.target.value }) },
+      // handing it to a player puts it on the players' team (it can be changed back above)
+      h("select", { onchange: (e) => set(e.target.value === OBR.player.id ? { owner: e.target.value } : { owner: e.target.value, team: "jogadores" }) },
         [{ id: OBR.player.id, name: "Mestre" }, ...state.party.filter((p) => p.role !== "GM")].map((p) => {
           const o = h("option", { value: p.id }, p.name);
           if (sheet.owner === p.id) o.selected = true;

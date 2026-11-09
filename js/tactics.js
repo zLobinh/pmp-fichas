@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.3";
-import { d, fmtM } from "./rules.js?v=0.9.3";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop } from "./battle.js?v=0.9.3";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.3";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.4";
+import { d, fmtM } from "./rules.js?v=0.9.4";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.4";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.4";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -285,11 +285,12 @@ const canReact = (sheet) => {
 export async function checkOpportunity(rules, mover, from, to) {
   const ms = getSheet(mover);
   if (!ms) return [];
-  const others = await OBR.scene.items.getItems((i) => i.id !== mover.id && i.metadata?.[SHEET_KEY] && inInitiative(i));
+  // (also who came in by a switch and waits for the initiative: it has its reaction)
+  const others = await OBR.scene.items.getItems((i) => i.id !== mover.id && i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball && (inInitiative(i) || i.metadata[SHEET_KEY].battle?.joinNextRound));
   const out = [];
   for (const h of others) {
     const hs = getSheet(h);
-    if ((hs.team ?? "inimigos") === (ms.team ?? "inimigos") || !canReact(hs)) continue;
+    if (allies(hs, ms) || !canReact(hs) || hs.battle?.oa) continue;
     const reach = rules.reach(hs.pkmn);
     const was = await distanceMeters(h, { ...mover, position: from });
     const now = await distanceMeters(h, { ...mover, position: to });
@@ -358,8 +359,11 @@ export function watchMovement(rules) {
         if (!inInitiative(t)) continue;
         const mv = s.battle?.move;
         if (!mv?.pos || !running || !settings.moveControl) {
-          // not tracking: just remember where it is
-          if (!samePos(mv?.pos, t.position)) await updateSheet(t.id, (sh) => { sh.battle.move = { used: 0, ...(sh.battle.move ?? {}), pos: { ...t.position } }; });
+          // not tracking: just remember where it is (in combat, leaving a reach still provokes)
+          if (!samePos(mv?.pos, t.position)) {
+            await updateSheet(t.id, (sh) => { sh.battle.move = { used: 0, ...(sh.battle.move ?? {}), pos: { ...t.position } }; });
+            if (running && mv?.pos && isActive(t)) await checkOpportunity(rules, t, mv.pos, t.position);
+          }
           continue;
         }
         if (samePos(mv.pos, t.position)) continue;

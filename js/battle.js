@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.3";
-import { d } from "./rules.js?v=0.9.3";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.4";
+import { d } from "./rules.js?v=0.9.4";
 
 // ------------------------------------------------------------------ conditions
 
@@ -470,6 +470,9 @@ export async function startTurn(rules, item) {
     b.econ = { ...econOf(sheet), reaction: !recharging };
     delete b.econ.loseReaction;
     if (b.paraLock) { delete b.paraLock; }
+    // an attack of opportunity not taken is gone when the reactor's own turn comes (the mover
+    // passing its turn right after moving doesn't take it away anymore)
+    delete b.oa;
     // Protect, Wide Guard, Endure...: "até o início de seu próximo turno"
     if (b.protection) { notes.push(`${b.protection.move} acabou`); delete b.protection; }
     if (b.econ.loseAction) {
@@ -556,8 +559,6 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
       const sheets = await battleItems();
       const byId = new Map(sheets.map((s) => [s.id, s]));
       const log = [];
-      // an attack of opportunity not taken is gone once the turn changes
-      for (const it of sheets) if (getSheet(it)?.battle?.oa) await updateSheet(it.id, (s) => { delete s.battle.oa; });
       if (prev.activeId && prev.activeId !== active.id && byId.has(prev.activeId)) {
         const notes = await endTurn(rules, byId.get(prev.activeId));
         if (notes.length) log.push(`Fim do turno de ${byId.get(prev.activeId).name}: ${notes.join("; ")}`);
