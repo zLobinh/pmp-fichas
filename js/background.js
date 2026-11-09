@@ -1,15 +1,15 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.5";
-import { describe } from "./combat.js?v=0.9.5";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.5";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.5";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.5";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.5";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.5";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.5";
-import { runPrepared } from "./prepared.js?v=0.9.5";
-import { loadRules } from "./store.js?v=0.9.5";
-import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.5";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.6";
+import { describe } from "./combat.js?v=0.9.6";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.6";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.6";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.6";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.6";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.6";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.6";
+import { runPrepared } from "./prepared.js?v=0.9.6";
+import { loadRules } from "./store.js?v=0.9.6";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.6";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications

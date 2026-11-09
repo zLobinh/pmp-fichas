@@ -4,21 +4,21 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.5";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.5";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.5";
-import { getRoller } from "./dice.js?v=0.9.5";
-import { defenses, endure } from "./protect.js?v=0.9.5";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.5";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.6";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.6";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.6";
+import { getRoller } from "./dice.js?v=0.9.6";
+import { defenses, endure } from "./protect.js?v=0.9.6";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.6";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.5";
+} from "./battle.js?v=0.9.6";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.5";
+} from "./tactics.js?v=0.9.6";
 
 export { TurnError };
 
@@ -608,7 +608,13 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (!ch.damage && !ch.give.length && !ch.stages.length && !ch.smack && !ch.clearHelp && !ch.syrup && !ch.cureBurn && !ch.stop) continue;
     const r = entry.results.find((x) => x.targetId === id);
     const ownTurn = isActive(targetItems.find((t) => t.id === id));
-    await updateSheet(id, (s) => {
+    await updateSheet(id, (s, dr) => {
+      // Sentinela: the hit pulls the creature back to where it left the reach, and it stops there
+      if (ch.stop && opts.oaBack && dr) {
+        dr.position = { ...opts.oaBack };
+        s.battle.move = { used: 0, ...(s.battle.move ?? {}), pos: { ...opts.oaBack } };
+        r.effects.push("puxado de volta pro alcance (Sentinela)");
+      }
       if (ch.damage) takeDamage(s.pkmn, ch.damage);
       if (ch.clearHelp) delete s.battle.helped; // its Helping Hand die went into this save
       if (ch.syrup) { s.battle.syrup = ch.syrup; r.effects.push(`coberto de xarope (−1 Velocidade por turno, ${ch.syrup} turnos)`); }

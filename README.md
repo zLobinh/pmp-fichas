@@ -136,7 +136,7 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   (levantar com 1,5 m, corrida de 1,5 m pro salto), Mestre de Combate Corpo a Corpo (vantagem no ataque de
   oportunidade, opção −5/+10), Mestre de Combate à Distância (opção −5 no acerto ou na CD / +10), Atacante
   Bestial (1x por turno rola o dano corpo a corpo 2x e fica com o maior), Sentinela (acertar o ataque de
-  oportunidade deixa o deslocamento em 0; Desengajar não adianta; reação quando um inimigo a 1,5 m ataca outro),
+  oportunidade puxa o inimigo de volta pro ponto onde ele saiu do alcance e deixa o deslocamento em 0; Desengajar não adianta; reação quando um inimigo a 1,5 m ataca outro),
   Investida Poderosa (depois da Disparada, ataque corpo a corpo com a ação bônus; +5 se andou 3 m), Escultor de
   Poder (Moves de área poupam 1 + MOVE aliados), Controlador de Área (área dobrada), Disputador (vantagem contra
   quem você agarra), Resiliente (TR).

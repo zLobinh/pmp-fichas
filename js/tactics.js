@@ -9,10 +9,10 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.5";
-import { d, fmtM } from "./rules.js?v=0.9.5";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.5";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.5";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.6";
+import { d, fmtM } from "./rules.js?v=0.9.6";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.6";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.6";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -269,9 +269,9 @@ export function oaMoves(rules, pkmn) {
 }
 
 // the reactor's owner gets the choice (battle.oa), shown on its quick sheet
-export async function offerOpportunity(reactor, target, why, { sentinel = false } = {}) {
+export async function offerOpportunity(reactor, target, why, { sentinel = false, back = null } = {}) {
   await updateSheet(reactor.id, (s) => {
-    s.battle.oa = { targetId: target.id, targetName: target.name, at: Date.now(), why, sentinel };
+    s.battle.oa = { targetId: target.id, targetName: target.name, at: Date.now(), why, sentinel, ...(back ? { back } : {}) };
   });
   await pushLog({ kind: "note", attacker: reactor.name, text: `⚔ pode fazer um ataque de oportunidade em ${target.name} (${why})` });
 }
@@ -301,7 +301,14 @@ export async function checkOpportunity(rules, mover, from, to) {
     if (!canReact(hs)) { await none(!econOf(hs).reaction ? `${h.name} já usou a reação` : `${h.name} não pode reagir agora`); continue; }
     if (ms.battle?.move?.disengage && !sentinel) { await none(`${mover.name} usou Desengajar`); continue; }
     if (rules.hasFeat(ms.pkmn, "Mobilidade") && ms.battle?.move?.meleed?.includes(h.id)) { await none(`${mover.name} tem Mobilidade e atacou ${h.name} corpo a corpo neste turno`); continue; }
-    await offerOpportunity(h, mover, "saiu do alcance");
+    // where it was when it left the reach: a Sentinela hit pulls it back there (the last point of the
+    // path still in reach, on the grid)
+    let back = { ...from };
+    for (let i = 20; i >= 0; i--) {
+      const p = await OBR.scene.grid.snapPosition({ x: from.x + ((to.x - from.x) * i) / 20, y: from.y + ((to.y - from.y) * i) / 20 });
+      if ((await distanceMeters(h, { ...mover, position: p })) <= reach + 0.05) { back = p; break; }
+    }
+    await offerOpportunity(h, mover, "saiu do alcance", { back });
     out.push(h);
   }
   return out;

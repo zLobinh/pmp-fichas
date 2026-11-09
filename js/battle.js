@@ -8,8 +8,8 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.5";
-import { d } from "./rules.js?v=0.9.5";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.6";
+import { d } from "./rules.js?v=0.9.6";
 
 // ------------------------------------------------------------------ conditions
 

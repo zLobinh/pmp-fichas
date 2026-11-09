@@ -1,17 +1,17 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.5";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.5";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.5";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.6";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.6";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.6";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.5";
-import { rollPending } from "./trainer.js?v=0.9.5";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.5";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.5";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.5";
-import { runPrepared } from "./prepared.js?v=0.9.5";
-import { seesTarget } from "./combat.js?v=0.9.5";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.5";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.6";
+import { rollPending } from "./trainer.js?v=0.9.6";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.6";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.6";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.6";
+import { runPrepared } from "./prepared.js?v=0.9.6";
+import { seesTarget } from "./combat.js?v=0.9.6";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.6";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -275,7 +275,7 @@ function oaBlock() {
   const strike = (name) => act(async () => {
     const [target] = await OBR.scene.items.getItems([oa.targetId]);
     if (!target) throw new Error("O alvo não está mais no mapa.");
-    state.last = await useMove(rules, state.item, name, [target], { opportunity: true, sentinel: oa.sentinel, ignoreRange: true });
+    state.last = await useMove(rules, state.item, name, [target], { opportunity: true, sentinel: oa.sentinel, ignoreRange: true, oaBack: oa.back ?? null });
     state.last._fresh = state.last.roller !== "Dice+";
   });
   return h("div", { class: "hud-target oa" },

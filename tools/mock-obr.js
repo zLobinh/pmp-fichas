@@ -43,6 +43,7 @@ const OBR = {
   scene: {
     grid: {
       getDpi: async () => 150,
+      snapPosition: async (p) => ({ x: Math.round((p.x - 75) / 150) * 150 + 75, y: Math.round((p.y - 75) / 150) * 150 + 75 }),
       getScale: async () => ({ raw: "1.5m", parsed: { multiplier: 1.5, unit: "m", digits: 1 } }),
       // Chebyshev, like the Owlbear default
       getDistance: async (a, b) => Math.round(Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) / 150),
