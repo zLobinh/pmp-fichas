@@ -1,15 +1,15 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.7";
-import { describe } from "./combat.js?v=0.9.7";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive } from "./ui.js?v=0.9.7";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.7";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.7";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.7";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.7";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.7";
-import { runPrepared } from "./prepared.js?v=0.9.7";
-import { loadRules } from "./store.js?v=0.9.7";
-import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.7";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.8";
+import { describe } from "./combat.js?v=0.9.8";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.8";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.8";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.8";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.8";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.8";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.8";
+import { runPrepared } from "./prepared.js?v=0.9.8";
+import { loadRules } from "./store.js?v=0.9.8";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.8";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -120,6 +120,26 @@ OBR.onReady(() => {
       } catch (e) {
         OBR.notification.show(e.message, "ERROR");
       }
+    },
+  });
+
+  // token size from the PMP size (Miúdo ½ square, Pequeno/Médio 1, Grande 2, Enorme 3, Imenso 4)
+  OBR.contextMenu.create({
+    id: `${ID}/fit-size`,
+    icons: [{
+      icon: asset("icons/area.svg"),
+      label: "Ajustar tamanho (PMP)",
+      filter: { every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      const rules = await loadRules();
+      // (players only resize their own Pokémon)
+      const ids = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id)).map((i) => i.id);
+      const { fitDraft, tokenCells } = await import("./map.js?v=0.9.8");
+      await OBR.scene.items.updateItems(ids, (ds) => {
+        for (const d0 of ds) { const s = d0.metadata[SHEET_KEY]; fitDraft(d0, tokenCells(rules, s.pkmn), s); }
+      });
+      OBR.notification.show(`Tamanho ajustado: ${ids.length} token(s)`, "SUCCESS");
     },
   });
 
@@ -268,7 +288,9 @@ OBR.onReady(() => {
     if (viewer.role === "GM" || data.owner === viewer.id) OBR.notification.show(data.text, "WARNING");
   });
 
+  // every roll / damage as a notification: only for who turned it on in the panel (it floods a battle)
   OBR.broadcast.onMessage(LOG_CHANNEL, ({ data }) => {
+    if (!rollNotices()) return;
     const text = describe(data, viewer);
     OBR.notification.show(text.length > 220 ? text.slice(0, 217) + "…" : text, "INFO");
   });

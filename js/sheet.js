@@ -1,14 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.7";
-import { getRoller } from "./dice.js?v=0.9.7";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.7";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.7";
-import { openStages } from "./ui.js?v=0.9.7";
-import { TurnError } from "./combat.js?v=0.9.7";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.7";
-import { useMove, describe, seesTarget } from "./combat.js?v=0.9.7";
-import { TYPE_COLOR, die } from "./ui.js?v=0.9.7";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.7";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.8";
+import { getRoller } from "./dice.js?v=0.9.8";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.8";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.8";
+import { openStages } from "./ui.js?v=0.9.8";
+import { TurnError } from "./combat.js?v=0.9.8";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.8";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.9.8";
+import { TYPE_COLOR, die } from "./ui.js?v=0.9.8";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.8";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -162,7 +162,8 @@ function limitedView(sheet) {
   const stages = Object.entries(pkmn.stages ?? {}).filter(([, v]) => v);
   return h("div", {},
     h("div", { class: "card" },
-      h("div", { class: "row" }, rules.types(pkmn).map(typeTag), h("span", { class: "spacer" }), h("span", { class: "muted small" }, TEAMS[teamOf(sheet)])),
+      // (an Illusion shows the types of who it pretends to be)
+      h("div", { class: "row" }, (sheet.battle?.fakeTypes ?? rules.types(pkmn)).map(typeTag), h("span", { class: "spacer" }), h("span", { class: "muted small" }, TEAMS[teamOf(sheet)])),
       h("div", { class: "hpbar", style: "margin-top:8px" }, h("i", { class: pct <= 25 ? "crit" : pct <= 50 ? "low" : "", style: `width:${pct}%` })),
       pkmn.hp.current <= 0 ? h("div", { class: "no small", style: "font-weight:700" }, "DESMAIADO") : null),
     h("div", { class: "card" },

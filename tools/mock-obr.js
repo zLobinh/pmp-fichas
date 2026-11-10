@@ -111,6 +111,7 @@ const builder = (type) => {
   const p = new Proxy({}, { get: (_, k) => (k === "build" ? () => item : (v) => { item[k] = v; return p; }) });
   return p;
 };
+export const buildImage = (image, grid) => { const b = builder("IMAGE"); b.image(image); b.grid(grid); b.scale({ x: 1, y: 1 }); return b; };
 export const buildShape = () => builder("SHAPE");
 export const buildLabel = () => builder("LABEL");
 export const buildLine = () => builder("LINE");

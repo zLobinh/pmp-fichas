@@ -2,11 +2,11 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.7";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.7";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities } from "./trainer.js?v=0.9.7";
-import { distanceMeters } from "./map.js?v=0.9.7";
-import { longRest } from "./qol.js?v=0.9.7";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.8";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.8";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode } from "./trainer.js?v=0.9.8";
+import { distanceMeters } from "./map.js?v=0.9.8";
+import { longRest } from "./qol.js?v=0.9.8";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");
@@ -51,11 +51,11 @@ function slotCard(p, i) {
     title: `${p.name} · ${s.pkmn.hp.current}/${state.rules.maxHP(s.pkmn)} HP`,
     onclick: () => { state.sel = p.id; render(); },
   },
-    h("div", { class: "tc-ball" }, h("img", { src: p.image?.url ?? "", alt: "" })),
+    h("div", { class: "tc-ball" }, h("img", { src: realImage(p), alt: "" })),
     h("span", { class: "tc-lv" }, `Nv ${state.rules.level(s.pkmn)}`),
     fainted ? h("span", { class: "tc-where down" }, "desmaiado") : out ? h("span", { class: "tc-where" }, "em campo") : null,
     Object.keys(conditionsOf(s)).length ? h("span", { class: "tc-cond" }, Object.keys(conditionsOf(s)).map((k) => CONDITIONS[k]?.icon ?? "•").join("")) : null,
-    h("div", { class: "tc-name" }, p.name),
+    h("div", { class: "tc-name" }, realName(p)),
     h("div", { class: "tc-hp" }, h("i", { class: hpClass(pct), style: `width:${pct}%` })));
 }
 
@@ -78,9 +78,23 @@ function details(p) {
       buttons.push(h("button", { class: "small", disabled: state.busy, title: "Tira da equipe (o token fica no mapa)", onclick: () => act(() => unlink(p)) }, "Desvincular"));
     }
   }
+  // Illusion: who it pretends to be (another Pokémon of this team); applied when it comes out
+  const illusion = hasIllusion(state.rules, s) ? h("div", { class: "row small", style: "gap:6px;margin-top:4px" },
+    h("span", {}, "Ilusão:"),
+    h("select", {
+      disabled: state.busy,
+      onchange: (e) => act(async () => {
+        const as = state.list.find((x) => x.id === e.target.value);
+        await updateSheet(p.id, (x) => { if (as) x.illusion = { id: as.id, name: realName(as) }; else delete x.illusion; });
+        // already on the field without a disguise: put it on now
+        const now = await getItem(p.id);
+        if (as && !inBall(getSheet(now)) && !getSheet(now).battle?.realLook) await applyIllusion(state.rules, now);
+      }),
+    }, [h("option", { value: "" }, "nenhuma"), ...state.list.filter((x) => x.id !== p.id).map((x) => h("option", { value: x.id, selected: s.illusion?.id === x.id }, realName(x)))]),
+    s.battle?.realLook ? h("span", { class: "chip" }, `disfarçado de ${s.illusion?.name ?? "?"}`) : null) : null;
   return h("div", { class: "tc-detail" },
     h("div", { class: "row" },
-      h("b", {}, p.name), h("span", { class: "tc-muted small" }, `Nv ${state.rules.level(s.pkmn)}`),
+      h("b", {}, realName(p)), h("span", { class: "tc-muted small" }, `Nv ${state.rules.level(s.pkmn)}`),
       h("span", { class: "spacer" }),
       h("span", { class: "small" }, `${s.pkmn.hp.current}/${state.rules.maxHP(s.pkmn)} HP`)),
     h("div", { class: "row small", style: "gap:4px;flex-wrap:wrap" },
@@ -88,8 +102,12 @@ function details(p) {
       s.battle?.trapped ? h("span", { class: "chip down" }, `preso (${s.battle.trapped.move})`) : null,
       s.battle?.mustSwitch ? h("span", { class: "chip down" }, `tem que trocar (${s.battle.mustSwitch.by})`) : null,
       !Object.keys(cond).length && !s.battle?.trapped && !s.battle?.mustSwitch ? h("span", { class: "tc-muted" }, fainted ? "Desmaiado" : out ? "Em campo" : "Na pokébola") : null),
-    buttons.length ? h("div", { class: "row", style: "gap:4px;margin-top:6px;flex-wrap:wrap" }, buttons) : null);
+    buttons.length ? h("div", { class: "row", style: "gap:4px;margin-top:6px;flex-wrap:wrap" }, buttons) : null,
+    illusion);
 }
+// the real name and image (under an Illusion the token shows someone else)
+const realName = (p) => getSheet(p)?.battle?.realLook?.name ?? p.name;
+const realImage = (p) => getSheet(p)?.battle?.realLook?.image?.url ?? p.image?.url ?? "";
 
 // 8 badges along the bottom; the GM clicks to give or take one
 const BADGE_COLORS = ["#9aa3ad", "#4aa3df", "#f2c94c", "#6fcf97", "#bb6bd9", "#eb5757", "#f2994a", "#56ccf2"];
@@ -154,6 +172,26 @@ async function doSwitch(from, to) {
   });
 }
 
+// "Adicionar pelo código": the export code of the PMP app -> token with sprite, size and sheet, in the ball
+function addByCode() {
+  if (!state.addOpen) {
+    return h("div", { class: "tc-add" }, h("button", { class: "small", disabled: state.busy, onclick: () => { state.addOpen = true; render(); } }, "＋ Adicionar Pokémon pelo código do app"));
+  }
+  const box = h("textarea", { class: "tc-code", rows: 3, placeholder: "Cole aqui o código exportado do app do PMP (um Pokémon)" });
+  return h("div", { class: "tc-add" },
+    box,
+    h("div", { class: "row", style: "gap:6px;margin-top:4px" },
+      h("button", { class: "small primary", disabled: state.busy, onclick: () => act(async () => {
+        if (!box.value.trim()) throw new Error("Cole o código do Pokémon.");
+        const made = await createFromCode(state.rules, state.trainer, box.value);
+        state.addOpen = false;
+        state.sel = made.id;
+        state.msg = `${made.name} entrou na equipe (na pokébola).`;
+      }) }, "Criar e guardar"),
+      h("button", { class: "small", onclick: () => { state.addOpen = false; render(); } }, "Cancelar"),
+      h("span", { class: "small tc-muted" }, "Imagem da extensão Imagem por Link; tamanho pelo PMP.")));
+}
+
 async function absorbSelected() {
   await act(async () => {
     const sel = (await OBR.player.getSelection()) ?? [];
@@ -214,6 +252,7 @@ function render() {
       h("div", { class: "tc-grid" }, slots.map(slotCard)),
       h("div", { class: "tc-art" }, state.trainer.image?.url ? h("img", { src: state.trainer.image.url, alt: "" }) : null)),
     details(state.list.find((p) => p.id === state.sel)),
+    state.list.length < MAX_PARTY ? addByCode() : null,
     badges(),
     h("div", { class: "tc-actions" },
       state.list.length < MAX_PARTY ? h("button", { class: "small", disabled: state.busy, title: "Selecione no mapa os tokens dos Pokémon (com ficha) e clique aqui", onclick: absorbSelected }, "Guardar os selecionados") : null,

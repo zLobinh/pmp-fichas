@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.7";
-import { fmtM } from "./rules.js?v=0.9.7";
-import { getRoller } from "./dice.js?v=0.9.7";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.8";
+import { fmtM } from "./rules.js?v=0.9.8";
+import { getRoller } from "./dice.js?v=0.9.8";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -11,6 +11,24 @@ const UNIT_TO_M = { m: 1, ft: 0.3048, km: 1000, mi: 1609.34 };
 function sizeCells(item) {
   if (!item.image || !item.grid?.dpi) return 1;
   return Math.max(1, Math.round((item.image.width / item.grid.dpi) * Math.abs(item.scale?.x ?? 1)));
+}
+
+// how many grid cells the token covers, from the PMP size (the species "size": "Médio (1,5 m)"):
+// Miúdo ½, Pequeno/Médio 1, Grande 2, Enorme 3, Imenso 4 — the same footprint the reach rules use
+export const SIZE_CELLS = [0.5, 1, 1, 2, 3, 4];
+export const tokenCells = (rules, pkmn) => SIZE_CELLS[rules.sizeRank(pkmn)] ?? 1;
+// in an item draft (+ its sheet): makes the image cover `cells` grid cells at scale 1, keeping the
+// left/right flip; a token in the pokéball keeps its small size and gets the right one back on release
+export function fitDraft(dr, cells, sheet = null) {
+  const w = dr.image?.width;
+  if (!w || !cells) return false;
+  dr.grid = { ...(dr.grid ?? {}), dpi: w / cells, offset: dr.grid?.offset ?? { x: w / 2, y: (dr.image.height ?? w) / 2 } };
+  const flip = Math.sign(dr.scale?.x ?? 1) || 1;
+  if (sheet?.ball) {
+    sheet.ball.scale = { x: flip, y: 1 };
+    dr.scale = { x: flip * 0.35, y: 0.35 };
+  } else dr.scale = { x: flip, y: 1 };
+  return true;
 }
 
 // meters per grid cell (the scene's scale, in meters)
@@ -112,8 +130,8 @@ export async function rollInitiative(rules, item) {
   // Velocidade: + stage x proficiency (pág. 73)
   // abilities and weather: Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Unburden (+2× prof.),
   // Quick Feet (×1,5, ignores paralysis), Slow Start (½), Stall (always last)
-  const { initiativeMods } = await import("./abilities.js?v=0.9.7");
-  const { fieldNow } = await import("./field.js?v=0.9.7");
+  const { initiativeMods } = await import("./abilities.js?v=0.9.8");
+  const { fieldNow } = await import("./field.js?v=0.9.8");
   const im = initiativeMods(rules, sheet, await fieldNow().catch(() => ({})));
   const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn) + im.add;
   const settings = await getSettings();

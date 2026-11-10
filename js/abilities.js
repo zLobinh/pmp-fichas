@@ -7,7 +7,7 @@
 //   endTurn     - end of the Pokémon's own turn (Speed Boost, Shed Skin, Rain Dish, Poison Heal...)
 //   initiative / movement - Swift Swim, Quick Feet, Slow Start, Stall...
 // No imports from battle.js (it imports this file): plain data in, plain results out.
-import { d } from "./rules.js?v=0.9.7";
+import { d } from "./rules.js?v=0.9.8";
 
 const NONVOL = ["Burning", "Frozen", "Paralyzed", "Poisoned", "BadlyPoisoned", "Drowsy", "Asleep"];
 const hasNonVol = (cond) => NONVOL.some((k) => cond?.[k]);

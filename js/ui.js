@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.7";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.8";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -44,6 +44,15 @@ export function markHudAlive(on = true) {
 }
 export function hudAlive() {
   try { return Date.now() - Number(localStorage.getItem(HUD_ALIVE_KEY) || 0) < 2500; } catch { return false; }
+}
+
+// a notification for every roll and damage: off by default (too many in a battle); per browser
+const ROLL_NOTICE_KEY = `${ID}/rollNotices`;
+export function rollNotices() {
+  try { return localStorage.getItem(ROLL_NOTICE_KEY) === "1"; } catch { return false; }
+}
+export function setRollNotices(on) {
+  try { localStorage.setItem(ROLL_NOTICE_KEY, on ? "1" : "0"); } catch {}
 }
 
 // per-player preference, kept in this browser

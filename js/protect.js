@@ -10,10 +10,10 @@
 //   3. no answer in time = no defense.
 // Defending costs the reaction, the action of the next turn and 1 PP. Used in a row (the round
 // before), the book's rule: 1d6 per consecutive success (max 6d6), all of them 5 or 6.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.7";
-import { fmtM } from "./rules.js?v=0.9.7";
-import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.7";
-import { distanceMeters } from "./map.js?v=0.9.7";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.8";
+import { fmtM } from "./rules.js?v=0.9.8";
+import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.8";
+import { distanceMeters } from "./map.js?v=0.9.8";
 
 // kind: what the protection covers
 //   single       any single-target move aimed at the user
@@ -140,6 +140,31 @@ async function ask(asks, attackerItem, moveLabel) {
   }
   for (const id of ids) await updateSheet(id, (s) => { if (s.battle.defenseAsk?.req === req) delete s.battle.defenseAsk; });
   return answers;
+}
+
+// ------------------------------------------------------------------ reactions to a switch
+// Pursuit hits the one leaving ("prestes a ... ser trocada"), Bolt Beak / Fishious Rend the one coming
+// in ("quando um Pokémon for substituído"): enemies that know them, have the reaction and reach it with
+// their movement are asked (the same 5 s popup); the switch waits for the answers. The attack itself
+// runs on the answering side (defend.js): reaction, next action lost, dice doubled.
+export const SWITCH_REACT = { Pursuit: "out", "Bolt Beak": "in", "Fishious Rend": "in" };
+export async function switchReactions(rules, mover, when) {
+  const ms = getSheet(mover);
+  if (!ms) return new Map();
+  const all = await OBR.scene.items.getItems((i) => i.id !== mover.id && i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball && inInitiative(i));
+  const asks = [];
+  for (const P of all) {
+    const ps = getSheet(P);
+    if (allies(ps, ms)) continue;
+    const options = Object.keys(SWITCH_REACT).filter((n) => SWITCH_REACT[n] === when && canDefend(rules, ps, n));
+    if (!options.length) continue;
+    const sp = rules.speeds(ps.pkmn);
+    const range = Math.max(sp.walk, sp.fly) + rules.reach(ps.pkmn);
+    if ((await distanceMeters(P, mover)) > range + 0.05) continue;
+    asks.push({ P, options, targets: [mover], kind: "switch" });
+  }
+  if (!asks.length) return new Map();
+  return ask(asks, mover, when === "out" ? "está sendo trocado (volta pra pokébola)" : "acabou de entrar em campo");
 }
 
 // before the rolls: who is protected (already, or now). Returns

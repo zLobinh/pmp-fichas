@@ -1,10 +1,11 @@
 // The "defend?" popup: opens on the screen of whoever controls a Pokémon that can react to an attack
 // (Protect, Wide Guard, Upper Hand, Endure...). 5 seconds to choose; time out = no defense.
 // The answer goes into the Pokémon's sheet (battle.defenseAnswer), where the attacker is waiting.
-import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.7";
-import { getRoller } from "./dice.js?v=0.9.7";
-import { useMove } from "./combat.js?v=0.9.7";
-import { DEFENSES, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.7";
+import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.8";
+import { getRoller } from "./dice.js?v=0.9.8";
+import { useMove } from "./combat.js?v=0.9.8";
+import { approach, moveToken } from "./tactics.js?v=0.9.8";
+import { DEFENSES, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.8";
 
 const params = new URLSearchParams(location.search);
 const pid = params.get("id");
@@ -42,7 +43,18 @@ async function choose(rules, P, ask, name) {
       ok = r.dice.every((v) => v >= 5);
       roll = `${dice}d6: ${r.dice.join(", ")}`;
     }
-    if (name === "Upper Hand") {
+    if (ask.kind === "switch") {
+      // Pursuit / Bolt Beak / Fishious Rend: rush next to it (no attacks of opportunity), attack with the
+      // dice doubled; the reaction and the next action are spent by useMove (defense)
+      const [target] = await OBR.scene.items.getItems([ask.attackerId]);
+      if (!target) throw new Error("o alvo já saiu");
+      const me = await getItem(pid);
+      const reach = rules.reach(getSheet(me).pkmn);
+      const spot = await approach(rules, me, target, { rangeInfo: { kind: "melee", meters: reach, label: "corpo a corpo" } }).catch(() => null);
+      if (spot) await moveToken(pid, spot.pos, 0);
+      const res = await useMove(rules, await getItem(pid), name, [target], { defense: true, ignoreRange: true, switchDouble: true });
+      ok = !!res.results.find((r) => r.targetId === ask.attackerId)?.attack?.hit;
+    } else if (name === "Upper Hand") {
       // the counterattack is a real move (reaction + next action); a hit cancels the attack
       if (ok) {
         const [attacker] = await OBR.scene.items.getItems([ask.attackerId]);
@@ -52,7 +64,7 @@ async function choose(rules, P, ask, name) {
     } else {
       await commitDefense(rules, P, name, ok, settings);
     }
-    if (name !== "Upper Hand") {
+    if (name !== "Upper Hand" && ask.kind !== "switch") {
       await pushLog({ kind: "note", attacker: P.name, text: ok
         ? `usou ${name} (reação, perde a ação do próximo turno)${roll ? ` — ${roll}` : ""}: ${defenseText(name)}`
         : `tentou ${name} e falhou (${roll}); gastou a reação e a ação do próximo turno` });
@@ -69,11 +81,13 @@ async function choose(rules, P, ask, name) {
 function render(rules, P, ask, status) {
   const left = Math.max(0, SECONDS - (Date.now() - started) / 1000);
   const others = ask.targets.filter((n) => n !== P.name);
+  const sw = ask.kind === "switch";
   const who = ask.kind === "endure" ? `${ask.damage} de dano vai derrubar ${P.name}.`
+    : sw ? `${P.name} pode correr até ele e atacar com o dobro dos dados.`
     : others.length ? `${P.name} pode proteger ${ask.targets.join(", ")}.` : `${P.name} pode se proteger.`;
   root.replaceChildren(h("div", { class: "defend" },
     h("div", { class: "row" },
-      h("b", {}, `${ask.attackerName} usou ${ask.move}`),
+      h("b", {}, sw ? `${ask.attackerName} ${ask.move}` : `${ask.attackerName} usou ${ask.move}`),
       h("span", { class: "spacer" }),
       h("b", { class: "defend-time" }, status ? "" : `${Math.ceil(left)} s`)),
     h("div", { class: "muted small" }, `${who} Gasta a reação e a ação do próximo turno.`),
@@ -82,8 +96,8 @@ function render(rules, P, ask, status) {
       ? h("div", { class: "small" }, status)
       : h("div", { class: "defend-opts" },
           ask.options.map((name) => h("button", { class: "primary", title: defenseText(name), onclick: () => choose(rules, P, ask, name) },
-            h("b", {}, name), h("span", { class: "small" }, defenseText(name)))),
-          h("button", { onclick: decline }, "Não defender"))));
+            h("b", {}, name), h("span", { class: "small" }, sw ? "reação, dobro dos dados; perde a ação do próximo turno" : defenseText(name)))),
+          h("button", { onclick: decline }, sw ? "Não atacar" : "Não defender"))));
 }
 
 let started = Date.now();

@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.7";
-import { describe } from "./combat.js?v=0.9.7";
-import { openSheet, openHud, autoHudEnabled, setAutoHud } from "./ui.js?v=0.9.7";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.7";
-import { dicePlusReady } from "./dice.js?v=0.9.7";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.7";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.8";
+import { describe } from "./combat.js?v=0.9.8";
+import { openSheet, openHud, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.8";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.8";
+import { dicePlusReady } from "./dice.js?v=0.9.8";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.8";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -61,7 +61,8 @@ function render() {
         : h("div", { class: "muted small", style: "margin-top:6px" }, "Nada rolado ainda nesta cena.")),
     h("div", { class: "card" },
       h("h2", {}, "Minhas preferências"),
-      h("label", { class: "row small" }, h("input", { type: "checkbox", checked: autoHudEnabled(), onchange: (e) => setAutoHud(e.target.checked) }), "Abrir a ficha rápida ao selecionar um Pokémon")),
+      h("label", { class: "row small" }, h("input", { type: "checkbox", checked: autoHudEnabled(), onchange: (e) => setAutoHud(e.target.checked) }), "Abrir a ficha rápida ao selecionar um Pokémon"),
+      h("label", { class: "row small" }, h("input", { type: "checkbox", checked: rollNotices(), onchange: (e) => setRollNotices(e.target.checked) }), "Mostrar um aviso na tela a cada rolagem e dano (o registro aqui embaixo sempre tem tudo)")),
     state.role === "GM"
       ? h("div", { class: "card" },
           h("h2", {}, "Configurações da mesa"),

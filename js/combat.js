@@ -4,25 +4,25 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.7";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.7";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.7";
-import { getRoller } from "./dice.js?v=0.9.7";
-import { defenses, endure } from "./protect.js?v=0.9.7";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.7";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.8";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.8";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.8";
+import { getRoller } from "./dice.js?v=0.9.8";
+import { defenses, endure } from "./protect.js?v=0.9.8";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.8";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.7";
+} from "./battle.js?v=0.9.8";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.7";
+} from "./tactics.js?v=0.9.8";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.7";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.7";
-import * as MFX from "./movefx.js?v=0.9.7";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.8";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.8";
+import * as MFX from "./movefx.js?v=0.9.8";
 
 export { TurnError };
 
@@ -348,7 +348,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   };
   // what doesn't depend on the target
   const uMods = {
-    mult: uDice.mult, add: uDice.add, double: aMods.double || uDice.double, halfMore: aMods.halfMore || uDice.halfMore,
+    // (Pursuit on the one leaving, Bolt Beak / Fishious Rend on the one coming in: dice doubled)
+    mult: uDice.mult, add: uDice.add, double: aMods.double || uDice.double || !!opts.switchDouble, halfMore: aMods.halfMore || uDice.halfMore,
     halve: uDice.halve, groups: aMods.groups + (uDice.groups ?? 0), keepHigh: aMods.keepHigh || uDice.keepHigh, keepLow: aMods.keepLow, flat: aMods.flat,
   };
   const baseSpec = dmgSpec(amp, red, uMods);
@@ -949,6 +950,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (ch.disguised === "Ice Face") s.battle.iceFaceBroken = true;
       if (dmgNow) {
         takeDamage(s.pkmn, dmgNow);
+        // Illusion: taking damage breaks it (the token shows the real Pokémon again)
+        if (!self && dr && dropIllusionDraft(s, dr)) r.effects.push(`a ilusão se desfez: era ${dr.name}!`);
         if (!self) {
           s.battle.lastHit = { by: attackerItem.id, round, amount: dmgNow, melee };
           dealt += Math.min(dmgNow, hpBefore);

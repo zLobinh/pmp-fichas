@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.7";
-import { d, fmtM } from "./rules.js?v=0.9.7";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.7";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.7";
-import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.7";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.7";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.8";
+import { d, fmtM } from "./rules.js?v=0.9.8";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.8";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.8";
+import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.8";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.8";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -75,6 +75,56 @@ export async function link(rules, trainerItem, pokemonItems) {
   await pushLog({ kind: "note", attacker: trainerItem.name, text: `guardou ${fresh.map((p) => p.name).join(", ")} na pokébola` });
 }
 
+// ------------------------------------------------------------------ a Pokémon from the app's code
+// The sprites are the ones of the "Imagem por Link" extension (same list: pokemon/index.json):
+// the export code from the PMP app becomes a token with its sprite, the right size and the sheet,
+// already in this trainer's pokéball.
+export const SPRITES = "https://zlobinh.github.io/mapas/pokemon/";
+let spriteIndex = null;
+async function sprites() {
+  spriteIndex ??= fetch(`${SPRITES}index.json`).then((r) => r.json()).catch((e) => { spriteIndex = null; throw new Error(`Não achei a lista de Pokémon (${e.message})`); });
+  return spriteIndex;
+}
+// the best sprite for this Pokémon: same Pokédex number (or name), the female one for females,
+// otherwise the plain one
+export async function spriteFor(rules, pkmn) {
+  const list = await sprites();
+  const num = Number(pkmn.number ?? rules.speciesData(pkmn)?.index);
+  const name = (pkmn.species?.current ?? "").toLowerCase();
+  let pool = list.filter((e) => e.d === num);
+  if (!pool.length) pool = list.filter((e) => e.n.toLowerCase() === name || name.startsWith(e.n.toLowerCase()));
+  if (!pool.length) return null;
+  const female = /^f/i.test(pkmn.gender ?? "") || /female|f[eê]mea/i.test(pkmn.gender ?? "");
+  const word = name.replace(pool[0].n.toLowerCase(), "").trim(); // "vulpix alola" -> "alola"
+  return (word ? pool.find((e) => e.v.toLowerCase().includes(word)) : null)
+    ?? (female ? pool.find((e) => /f[eê]mea/i.test(e.v)) : null)
+    ?? pool.find((e) => !e.v) ?? pool[0];
+}
+export async function createFromCode(rules, trainerItem, code) {
+  const t = trainerOf(trainerItem);
+  if (!t) throw new Error("Esse token não é um treinador.");
+  if ((await party(trainerItem.id)).length >= MAX_PARTY) throw new Error(`O treinador já tem ${MAX_PARTY} Pokémon.`);
+  const pkmn = parseExport(code, rules);
+  const sp = await spriteFor(rules, pkmn);
+  if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
+  const { tokenCells } = await import("./map.js?v=0.9.8");
+  const cells = tokenCells(rules, pkmn);
+  const dpi = await OBR.scene.grid.getDpi();
+  const item = SDK.buildImage(
+    { url: `${SPRITES}${encodeURIComponent(sp.f)}`, width: sp.w, height: sp.h, mime: sp.f.endsWith(".gif") ? "image/gif" : "image/png" },
+    { dpi: sp.w / cells, offset: { x: sp.w / 2, y: sp.h / 2 } },
+  )
+    .name(rules.name(pkmn))
+    .position({ x: trainerItem.position.x + dpi, y: trainerItem.position.y })
+    .layer("CHARACTER")
+    .metadata({ [SHEET_KEY]: { pkmn, owner: t.owner, team: t.team, imported: Date.now() } })
+    .build();
+  await OBR.scene.items.addItems([item]);
+  const [made] = await OBR.scene.items.getItems([item.id]);
+  await link(rules, trainerItem, [made]);
+  return made;
+}
+
 export async function unlink(pokemon) {
   const s = getSheet(pokemon);
   if (inBall(s)) throw new Error("Libere o Pokémon antes de desvincular.");
@@ -123,6 +173,7 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
   const notes = [];
   await leaveInitiativeQuiet(pokemon, { pass });
   await updateSheet(pokemon.id, (s, dr) => {
+    dropIllusionDraft(s, dr); // back to its own look in the ball
     exitEffects(rules, s, inCombat, notes);
     s.ball = { scale: { ...(dr.scale ?? { x: 1, y: 1 }) }, layer: dr.layer };
     dr.visible = false;
@@ -132,6 +183,41 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
     dr.scale = { x: (dr.scale?.x ?? 1) * BALL_SCALE, y: (dr.scale?.y ?? 1) * BALL_SCALE };
   });
   if (!quiet) await pushLog({ kind: "note", attacker: trainerItem.name, text: `recolheu ${pokemon.name}${notes.length ? ` (${notes.join("; ")})` : ""}` });
+}
+
+// ------------------------------------------------------------------ Illusion (Zoroark)
+// The trainer picks who it pretends to be (sheet.illusion = { id, name }). Coming out of the ball it
+// takes that Pokémon's look (image, size, name); the real one is kept in battle.realLook. A hit that
+// damages it (combat.js) or going back to the ball undoes it.
+export const hasIllusion = (rules, sheet) => !!sheet && (sheet.battle?.ability ? sheet.battle.ability === "Illusion" : rules.abilities(sheet.pkmn).includes("Illusion"));
+export async function applyIllusion(rules, item) {
+  const s = getSheet(item);
+  if (!hasIllusion(rules, s) || !s.illusion?.id || inBall(s) || s.battle?.realLook) return false;
+  const [as] = await OBR.scene.items.getItems([s.illusion.id]);
+  if (!as?.image) return false;
+  const types = getSheet(as) ? rules.types(getSheet(as).pkmn) : null;
+  await updateSheet(item.id, (sh, dr) => {
+    sh.battle.realLook = { image: { ...dr.image }, grid: JSON.parse(JSON.stringify(dr.grid ?? {})), name: dr.name, types: null };
+    sh.battle.fakeTypes = types;
+    const sign = Math.sign(dr.scale?.x ?? 1) || 1;
+    dr.image = { ...as.image };
+    if (as.grid) dr.grid = JSON.parse(JSON.stringify(as.grid));
+    const base = Math.abs(getSheet(as)?.ball?.scale?.x ?? as.scale?.x ?? 1);
+    dr.scale = { x: sign * base, y: base };
+    dr.name = as.name;
+  });
+  return true;
+}
+// undoes it (in an updateSheet draft); returns true when there was one
+export function dropIllusionDraft(s, dr) {
+  const real = s.battle?.realLook;
+  if (!real) return false;
+  dr.image = { ...real.image };
+  if (real.grid && Object.keys(real.grid).length) dr.grid = real.grid;
+  dr.name = real.name;
+  delete s.battle.realLook;
+  delete s.battle.fakeTypes;
+  return true;
 }
 
 // a free square around a point (rings of 1, 2, 3 squares)
@@ -171,7 +257,9 @@ export async function release(rules, pokemon, trainerItem, { pos = null, quiet =
     delete s.ball;
     s.battle.move = { used: 0, pos: { ...at } };
   });
-  if (!quiet) await pushLog({ kind: "note", attacker: trainerItem.name, text: `liberou ${pokemon.name}` });
+  // Illusion: it comes out looking like the Pokémon chosen in the trainer's panel
+  const fake = await applyIllusion(rules, (await OBR.scene.items.getItems([pokemon.id]))[0]).catch(() => false);
+  if (!quiet) await pushLog({ kind: "note", attacker: trainerItem.name, text: `liberou ${fake ? getSheet(pokemon).illusion?.name ?? pokemon.name : pokemon.name}` });
   return at;
 }
 
@@ -237,6 +325,13 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   // (the order before the one leaving is taken out of it: the new one takes the same place)
   const order0 = Object.values((await OBR.scene.getMetadata())["com.pretty-initiative/order"] ?? {});
 
+  // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
+  if (combat && !fainted) {
+    const { switchReactions } = await import("./protect.js?v=0.9.8");
+    const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
+    if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
+    outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
+  }
   // the one coming in takes the place on the field and in the initiative
   await store(rules, outItem, trainerItem, { quiet: true, pass: false });
   await release(rules, inItem, trainerItem, { pos, quiet: true });
@@ -260,8 +355,15 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   // the action of the one that left (voluntary switch)
   if (tracked && !fainted && !opts.forced && !opts.free) await updateSheet(outItem.id, (s) => { s.battle.econ = { ...econOf(s), action: false }; });
   const why = opts.forced ? ` (forçado por ${opts.by})` : opts.free ? ` (${opts.by}, ação livre)` : fainted ? " (desmaiado: ação livre)" : tracked ? " (gastou a ação)" : "";
-  await pushLog({ kind: "note", attacker: trainerItem.name, text: `trocou ${outItem.name} por ${inItem.name}${why}${stages ? " — Baton Pass passou os estágios" : ""}${combat ? "; o novo rola iniciativa no começo da próxima rodada" : ""}` });
+  // (the one coming in may be wearing an Illusion: its new name is the one everyone sees)
+  const inNow = (await OBR.scene.items.getItems([inItem.id]))[0] ?? inItem;
+  await pushLog({ kind: "note", attacker: trainerItem.name, text: `trocou ${outItem.name} por ${inNow.name}${why}${stages ? " — Baton Pass passou os estágios" : ""}${combat ? "; o novo rola iniciativa no começo da próxima rodada" : ""}` });
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
+  // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
+  if (combat) {
+    const { switchReactions } = await import("./protect.js?v=0.9.8");
+    await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
+  }
 }
 
 // a forced switch to a random healthy one (Dragon Tail, Circle Throw); null when it can't

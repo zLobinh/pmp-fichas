@@ -202,6 +202,19 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   combate, o painel do treinador abre pro dono escolher quem entra.
 - **Trainer Card:** o painel do treinador virou um cartão com os 6 Pokémon em molduras, a arte do token do
   treinador, 8 insígnias (o mestre clica pra marcar) e o botão *Descanso longo* (equipe toda, fora do combate).
+- **Reações à troca:** quando um Pokémon é trocado, a troca espera os inimigos que podem reagir (o mesmo
+  popup de 5 s do Protect): **Pursuit** ataca quem está saindo, **Bolt Beak** e **Fishious Rend** quem acabou
+  de entrar. O atacante corre até o alvo sem provocar ataque de oportunidade, rola com o dobro dos dados, gasta
+  a reação e perde a ação do próximo turno.
+- **Illusion (Zoroark):** no cartão do treinador, escolha por quem ele se passa (outro Pokémon da equipe). Ao
+  sair da pokébola, o token fica com a imagem, o tamanho, o nome e os tipos (na ficha dos outros) do disfarce;
+  o primeiro dano desfaz a ilusão (e voltar pra pokébola também).
+- **Adicionar pelo código:** no cartão do treinador, "Adicionar Pokémon pelo código do app" cria o token com o
+  sprite da extensão Imagem por Link (mesma lista), o tamanho certo e a ficha, já na pokébola.
+- **Tamanho do token pelo PMP:** Miúdo ½ quadrado, Pequeno/Médio 1, Grande 2, Enorme 3, Imenso 4. Na
+  importação (opção marcada por padrão), na criação pelo código e no menu "Ajustar tamanho (PMP)".
+- **Sem spam de avisos:** rolagens e danos não aparecem mais como notificação na tela (ficam no registro do
+  painel). Quem quiser pode religar em "Minhas preferências".
 - **Habilidades automáticas (abilities.js):** as 287 habilidades dos Pokémon do PMP entram nas contas quando
   dá: acerto/CD (Compound Eyes, Hustle, Victory Star), crítico (Super Luck, Merciless, Sniper, Battle Armor),
   dados de dano (Blaze/Torrent/Overgrow/Swarm, Guts, Technician, Adaptability, Iron Fist, Strong Jaw, Sharpness,

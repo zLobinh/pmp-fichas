@@ -277,6 +277,8 @@ body:has(.tcard) { background: transparent; }
 }
 .tc-badge i { width: 18px; height: 18px; background: #2a2a2e; clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%); }
 .tc-badge.on i { background: radial-gradient(circle at 35% 30%, #fff 0 12%, var(--badge) 40%, color-mix(in srgb, var(--badge) 60%, #000) 100%); }
+.tc-add { margin: 0 12px; }
+.tc-code { width: 100%; box-sizing: border-box; font: 11px monospace; background: #1b1c20; color: #ddd; border: 1px solid #55565c; border-radius: 6px; padding: 6px; resize: vertical; }
 .tc-actions { display: flex; gap: 6px; align-items: center; padding: 0 12px; flex-wrap: wrap; }
 .tcard button { font-size: 12px; }
 @media (max-width: 520px) {

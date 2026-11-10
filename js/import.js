@@ -1,4 +1,5 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.7";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.8";
+import { fitDraft, tokenCells } from "./map.js?v=0.9.8";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);
@@ -36,6 +37,7 @@ $("ok").onclick = async () => {
       for (const d of drafts) {
         d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
         if ($("rename").checked) d.name = name;
+        if ($("resize").checked) fitDraft(d, tokenCells(rules, pkmn));
       }
     });
     OBR.notification.show(`Ficha de ${name} (nível ${rules.level(pkmn)}) importada!`, "SUCCESS");
