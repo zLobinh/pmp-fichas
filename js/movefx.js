@@ -1,7 +1,7 @@
 // Moves whose effect is more than "hit, damage, stage, condition": healing, draining, recoil, fixed
 // damage, dice that double on a condition, variable number of hits, weather/terrain moves, Leech Seed,
 // Taunt & co., Substitute, Stockpile... The texts are the PMP ones (moves.json).
-import { d } from "./rules.js?v=0.9.10";
+import { d } from "./rules.js?v=0.9.11";
 
 const MULTI_TABLE = (n) => (n >= 8 ? 4 : n >= 7 ? 3 : n >= 4 ? 2 : 1); // "D8: 1-3 mais 1 ... 8 mais 4"
 const MINIMIZE_HIT = ["Stomp", "Body Slam", "Dragon Rush", "Flying Press", "Steamroller", "Heavy Slam", "Heat Crash", "Supercell Slam"];
@@ -104,7 +104,9 @@ export function special(name, raw) {
   if (MINIMIZE_HIT.includes(name)) s.minimizeHit = true;
   if (FLY_HIT.includes(name)) s.flyHit = true;
   if (["Fusion Bolt", "Fusion Flare"].includes(name)) s.fusion = name === "Fusion Bolt" ? "Fusion Flare" : "Fusion Bolt";
-  if (["Spikes", "Stealth Rock", "Toxic Spikes", "Sticky Web"].includes(name)) s.hazard = true;
+  const VORTEX = { Whirlpool: "Water", "Fire Spin": "Fire", "Sand Tomb": "Ground", Infestation: "Bug", "Magma Storm": "Fire", "G-Max Sandblast": "Ground" };
+  if (VORTEX[name]) s.vortex = VORTEX[name];
+  if (["Wrap", "Bind", "Clamp", "Snap Trap", "Thunder Cage", "Octolock"].includes(name)) s.bind = true;
   return s;
 }
 
@@ -223,7 +225,7 @@ export function fixedDamage(rules, aSheet, tSheet, sp, aItem, tItem) {
   if (sp.fixed === "counter") {
     const lh = aSheet.battle?.lastHit;
     if (!lh || lh.by !== tItem.id) return 0;
-    const k = sp.name === "Metal Burst" ? 1.5 : 2;
+    const k = sp.name === "Metal Burst" || sp.name === "Comeuppance" ? 1.5 : 2;
     if (sp.name === "Counter" && !lh.melee) return 0;
     if (sp.name === "Mirror Coat" && lh.melee) return 0;
     return Math.min(5 * lvl, Math.floor(lh.amount * k));
@@ -270,6 +272,16 @@ export function endTurnMoves(rules, sheet, { conditionGive }) {
     cross.seedHeal = { by: b.seeded.by, team: b.seeded.team, amount: before - pk.hp.current };
   }
   if (b.cursed) hurt(Math.max(2, lvl), "👻 Curse");
+  // Wrap / Bind / Clamp / Snap Trap / Thunder Cage / Octolock: while still held by that one
+  if (b.bound) {
+    if (b.cond?.Grappled?.by === b.bound.by) {
+      hurt(lvlHalf(lvl), `🤼 ${b.bound.move}`);
+      if (b.bound.octo) {
+        for (const k of ["Defense", "SpecialDefense"]) { pk.stages = Array.isArray(pk.stages) || !pk.stages ? {} : pk.stages; pk.stages[k] = Math.max(-6, (pk.stages[k] ?? 0) - 1); }
+        notes.push("Octolock: Defesa e Defesa Especial −1");
+      }
+    } else delete b.bound;
+  }
   if (b.perish != null) {
     b.perish -= 1;
     if (b.perish <= 0) {

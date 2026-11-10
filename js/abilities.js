@@ -7,7 +7,7 @@
 //   endTurn     - end of the Pokémon's own turn (Speed Boost, Shed Skin, Rain Dish, Poison Heal...)
 //   initiative / movement - Swift Swim, Quick Feet, Slow Start, Stall...
 // No imports from battle.js (it imports this file): plain data in, plain results out.
-import { d } from "./rules.js?v=0.9.10";
+import { d } from "./rules.js?v=0.9.11";
 
 const NONVOL = ["Burning", "Frozen", "Paralyzed", "Poisoned", "BadlyPoisoned", "Drowsy", "Asleep"];
 const hasNonVol = (cond) => NONVOL.some((k) => cond?.[k]);
@@ -195,6 +195,8 @@ export function targetMods(rules, aSheet, tSheet, move, raw, ctx) {
   if (isPowder(name) && (has("Overcoat") || rules.types(pk).includes("Grass"))) out.immune = has("Overcoat") ? "Overcoat" : "tipo Grama (pó/esporo)";
   if (statusMove && has("Good as Gold")) out.immune = "Good as Gold";
   if (statusMove && has("Magic Bounce")) { out.immune = "Magic Bounce (devolvido ao atacante)"; out.bounce = true; }
+  // Magic Coat (a reaction, protect.js): the same until its next turn
+  if (statusMove && tSheet.battle?.protection?.kind === "bounce" && name !== "Magic Coat") { out.immune = "Magic Coat (devolvido ao atacante)"; out.bounce = true; }
   if (damaging && has("Telepathy") && ctx.ally) out.immune = "Telepathy (não sofre dano de aliados)";
   if (damaging && has("Wonder Guard") && (ctx.eff ?? 1) < 2) out.immune = "Wonder Guard (só super efetivo)";
   if (has("Armor Tail") || (ctx.others ?? []).some((o) => o.allyOfTarget && o.distToTarget <= 6.05 && abilitiesOf(rules, o.sheet, ctx).includes("Armor Tail"))) {

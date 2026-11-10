@@ -1,11 +1,11 @@
 // The "defend?" popup: opens on the screen of whoever controls a Pokémon that can react to an attack
 // (Protect, Wide Guard, Upper Hand, Endure...). 5 seconds to choose; time out = no defense.
 // The answer goes into the Pokémon's sheet (battle.defenseAnswer), where the attacker is waiting.
-import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.10";
-import { getRoller } from "./dice.js?v=0.9.10";
-import { useMove } from "./combat.js?v=0.9.10";
-import { approach, moveToken } from "./tactics.js?v=0.9.10";
-import { DEFENSES, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.10";
+import { OBR, ID, loadRules, getSheet, getItem, updateSheet, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.11";
+import { getRoller } from "./dice.js?v=0.9.11";
+import { useMove } from "./combat.js?v=0.9.11";
+import { approach, moveToken } from "./tactics.js?v=0.9.11";
+import { DEFENSES, AFTER_HIT, streakDice, commitDefense, defenseText, roundNow } from "./protect.js?v=0.9.11";
 
 const params = new URLSearchParams(location.search);
 const pid = params.get("id");
@@ -43,17 +43,30 @@ async function choose(rules, P, ask, name) {
       ok = r.dice.every((v) => v >= 5);
       roll = `${dice}d6: ${r.dice.join(", ")}`;
     }
-    if (ask.kind === "switch") {
-      // Pursuit / Bolt Beak / Fishious Rend: rush next to it (no attacks of opportunity), attack with the
-      // dice doubled; the reaction and the next action are spent by useMove (defense)
+    const isReact = DEFENSES[name]?.kind === "react" || AFTER_HIT[name];
+    if (ask.kind === "switch" || isReact) {
+      // Pursuit / Bolt Beak / Fishious Rend (a switch), Sucker Punch / Thunderclap / Baby-Doll Eyes /
+      // Tearful Look / Withdraw (before the hit), Counter / Mirror Coat / Metal Burst / Comeuppance / Spite
+      // (after it): the move itself, as a reaction that costs the next action (useMove with defense);
+      // a melee one rushes next to the attacker first (no attacks of opportunity)
       const [target] = await OBR.scene.items.getItems([ask.attackerId]);
       if (!target) throw new Error("o alvo já saiu");
       const me = await getItem(pid);
-      const reach = rules.reach(getSheet(me).pkmn);
-      const spot = await approach(rules, me, target, { rangeInfo: { kind: "melee", meters: reach, label: "corpo a corpo" } }).catch(() => null);
-      if (spot) await moveToken(pid, spot.pos, 0);
-      const res = await useMove(rules, await getItem(pid), name, [target], { defense: true, ignoreRange: true, switchDouble: true });
-      ok = !!res.results.find((r) => r.targetId === ask.attackerId)?.attack?.hit;
+      const md = rules.moveData(getSheet(me).pkmn, name);
+      if (name !== "Withdraw" && md.rangeInfo?.kind === "melee") {
+        const reach = rules.reach(getSheet(me).pkmn);
+        const spot = await approach(rules, me, target, { rangeInfo: { kind: "melee", meters: reach, label: "corpo a corpo" } }).catch(() => null);
+        if (spot) await moveToken(pid, spot.pos, 0);
+      }
+      const res = await useMove(rules, await getItem(pid), name, name === "Withdraw" ? [] : [target], { defense: true, ignoreRange: true, switchDouble: ask.kind === "switch" });
+      const r0 = res.results.find((r) => r.targetId === ask.attackerId);
+      ok = name === "Withdraw" || !!(r0?.attack?.hit || r0?.contest?.success || r0?.damage?.final);
+      // Spite: 1d4 PP off the move that hit it
+      if (name === "Spite" && r0?.contest?.success) {
+        const lost = 1 + Math.floor(Math.random() * 4);
+        await updateSheet(target.id, (s) => { const mv = s.battle.lastMove; if (mv && s.pkmn.moves[mv]) s.pkmn.moves[mv].pp = Math.max(0, rules.movePP(s.pkmn, mv) - lost); });
+        await pushLog({ kind: "note", attacker: P.name, text: `Spite: ${target.name} perdeu ${lost} PP de ${getSheet(target).battle?.lastMove ?? "seu Move"}` });
+      }
     } else if (name === "Upper Hand") {
       // the counterattack is a real move (reaction + next action); a hit cancels the attack
       if (ok) {
@@ -64,7 +77,7 @@ async function choose(rules, P, ask, name) {
     } else {
       await commitDefense(rules, P, name, ok, settings);
     }
-    if (name !== "Upper Hand" && ask.kind !== "switch") {
+    if (name !== "Upper Hand" && ask.kind !== "switch" && !isReact) {
       await pushLog({ kind: "note", attacker: P.name, text: ok
         ? `usou ${name} (reação, perde a ação do próximo turno)${roll ? ` — ${roll}` : ""}: ${defenseText(name)}`
         : `tentou ${name} e falhou (${roll}); gastou a reação e a ação do próximo turno` });
@@ -81,9 +94,10 @@ async function choose(rules, P, ask, name) {
 function render(rules, P, ask, status) {
   const left = Math.max(0, SECONDS - (Date.now() - started) / 1000);
   const others = ask.targets.filter((n) => n !== P.name);
-  const sw = ask.kind === "switch";
+  const sw = ask.kind === "switch" || ask.kind === "after";
   const who = ask.kind === "endure" ? `${ask.damage} de dano vai derrubar ${P.name}.`
-    : sw ? `${P.name} pode correr até ele e atacar com o dobro dos dados.`
+    : ask.kind === "switch" ? `${P.name} pode correr até ele e atacar com o dobro dos dados.`
+    : ask.kind === "after" ? `${P.name} pode revidar.`
     : others.length ? `${P.name} pode proteger ${ask.targets.join(", ")}.` : `${P.name} pode se proteger.`;
   root.replaceChildren(h("div", { class: "defend" },
     h("div", { class: "row" },
@@ -96,8 +110,10 @@ function render(rules, P, ask, status) {
       ? h("div", { class: "small" }, status)
       : h("div", { class: "defend-opts" },
           ask.options.map((name) => h("button", { class: "primary", title: defenseText(name), onclick: () => choose(rules, P, ask, name) },
-            h("b", {}, name), h("span", { class: "small" }, sw ? "reação, dobro dos dados; perde a ação do próximo turno" : defenseText(name)))),
-          h("button", { onclick: decline }, sw ? "Não atacar" : "Não defender"))));
+            h("b", {}, name), h("span", { class: "small" }, ask.kind === "switch" ? "reação, dobro dos dados; perde a ação do próximo turno"
+              : AFTER_HIT[name] ? { Counter: "devolve o dobro do dano corpo a corpo", "Mirror Coat": "devolve o dobro do dano à distância", "Metal Burst": "devolve 1,5× o dano", Comeuppance: "devolve 1,5× o dano", Spite: "tira 1d4 PP do Move dele" }[name]
+              : defenseText(name)))),
+          h("button", { onclick: decline }, sw ? "Não reagir" : "Não reagir"))));
 }
 
 let started = Date.now();

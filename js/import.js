@@ -1,5 +1,5 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.10";
-import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.10";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.11";
+import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.11";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);
@@ -34,14 +34,22 @@ $("ok").onclick = async () => {
     const gm = (await OBR.player.getRole()) === "GM";
     const team = gm ? $("team").value : "jogadores";
     const cellM = await cellMeters();
+    let again = false;
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
-        d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
-        if ($("rename").checked) d.name = name;
-        if ($("resize").checked) fitDraft(d, tokenCells(rules, pkmn, cellM));
+        const old = d.metadata[SHEET_KEY];
+        if (old?.pkmn) {
+          // reimport: the new sheet, keeping who owns it, the team, the trainer, the pokéball and the battle
+          again = true;
+          old.pkmn = pkmn;
+          old.imported = Date.now();
+        } else d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
+        // (under an Illusion the name/size are the disguise's: leave them)
+        if ($("rename").checked && !old?.battle?.realLook) d.name = name;
+        if ($("resize").checked && !old?.battle?.realLook) fitDraft(d, tokenCells(rules, pkmn, cellM), d.metadata[SHEET_KEY]);
       }
     });
-    OBR.notification.show(`Ficha de ${name} (nível ${rules.level(pkmn)}) importada!`, "SUCCESS");
+    OBR.notification.show(`Ficha de ${name} (nível ${rules.level(pkmn)}) ${again ? "atualizada (equipe, dono e batalha mantidos)" : "importada"}!`, "SUCCESS");
     await close();
   } catch (e) {
     showError(e.message ?? String(e));
@@ -53,5 +61,6 @@ $("ok").onclick = async () => {
 
 ready.then(async () => {
   syncTheme();
-  if ((await OBR.player.getRole()) === "GM") $("teamRow").style.display = "";
+  // (reimport: the team stays the one the token already has)
+  if ((await OBR.player.getRole()) === "GM" && !new URLSearchParams(location.search).get("re")) $("teamRow").style.display = "";
 }).catch(() => {});

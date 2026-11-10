@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.10";
-import { d } from "./rules.js?v=0.9.10";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.10";
-import { fieldNow, expireField, grounded } from "./field.js?v=0.9.10";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.10";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.11";
+import { d } from "./rules.js?v=0.9.11";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.11";
+import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn } from "./field.js?v=0.9.11";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.11";
 
 // ------------------------------------------------------------------ conditions
 
@@ -422,7 +422,7 @@ function damageNow(sheet, n) {
 export async function endTurn(rules, item) {
   const notes = [];
   const sleepRoll = has(getSheet(item), "Asleep") ? d(6) : null;
-  const field = await fieldNow();
+  const field = await fieldNow(null, null, item);
   const s0 = getSheet(item);
   const ab0 = abilitiesOf(rules, s0);
   const isGrounded = grounded(s0, ab0);
@@ -430,8 +430,14 @@ export async function endTurn(rules, item) {
   const enemies = await OBR.scene.items.getItems((i) => i.id !== item.id && i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball);
   const badDreams = enemies.some((o) => !allies(getSheet(o), s0) && abilitiesOf(rules, getSheet(o)).includes("Bad Dreams"));
   let cross = {};
+  // ending the turn inside a Whirlpool / Fire Spin / Sand Tomb vortex: half its level
+  const vortex = await vortexEndTurn(rules, item).catch(() => null);
   await updateSheet(item.id, (sheet) => {
     const b = sheet.battle;
+    if (vortex && !ab0.includes("Magic Guard") && sheet.pkmn.hp.current > 0) {
+      damageNow(sheet, vortex.amount);
+      notes.push(`🌀 ${vortex.move ?? "redemoinho"}: −${vortex.amount} HP`);
+    }
     // a charge/invulnerable phase not used by the end of its next turn is lost
     if (b.charging && (b.turns ?? 0) >= (b.charging.readyAt ?? 0)) {
       notes.push(b.charging.invuln ? `🌀 ${b.charging.move}: reapareceu sem atacar` : `⚡ ${b.charging.move}: a carga se perdeu`);
@@ -509,7 +515,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.10");
+    const { distanceMeters } = await import("./map.js?v=0.9.11");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
@@ -526,7 +532,7 @@ export async function endTurn(rules, item) {
 export async function startTurn(rules, item) {
   const notes = [];
   const thawRoll = has(getSheet(item), "Frozen") ? d(6) : null;
-  const field = await fieldNow();
+  const field = await fieldNow(null, null, item);
   const ab0 = abilitiesOf(rules, getSheet(item));
   const isGrounded = grounded(getSheet(item), ab0);
   await updateSheet(item.id, (sheet) => {
@@ -645,6 +651,15 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
       if (byId.has(active.id)) {
         const notes = await startTurn(rules, (await OBR.scene.items.getItems([active.id]))[0]);
         log.push(`Turno de ${active.name}${notes.length ? `: ${notes.join("; ")}` : ""}`);
+      }
+      // an area's turn (Sunny Day, Whirlpool...): one round less, then straight to the next one
+      // (the turn passes first: an area that ends is then taken out of the order)
+      if (areaOf(active)) {
+        await passTurn(active.id).catch(() => {});
+        const note = await areaTurn(active).catch(() => null);
+        if (note) log.push(note);
+        for (const text of log) await pushLog({ kind: "note", attacker: "Campo", text });
+        return true;
       }
       for (const text of log) await pushLog({ kind: "note", attacker: "Combate", text });
       if (byId.has(active.id) && onTurnStart) {

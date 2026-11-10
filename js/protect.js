@@ -10,10 +10,10 @@
 //   3. no answer in time = no defense.
 // Defending costs the reaction, the action of the next turn and 1 PP. Used in a row (the round
 // before), the book's rule: 1d6 per consecutive success (max 6d6), all of them 5 or 6.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.10";
-import { fmtM } from "./rules.js?v=0.9.10";
-import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.10";
-import { distanceMeters } from "./map.js?v=0.9.10";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.11";
+import { fmtM } from "./rules.js?v=0.9.11";
+import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.11";
+import { distanceMeters } from "./map.js?v=0.9.11";
 
 // kind: what the protection covers
 //   single       any single-target move aimed at the user
@@ -38,6 +38,23 @@ export const DEFENSES = {
   "Crafty Shield": { kind: "crafty", radius: 3 },
   "Upper Hand": { kind: "upper" },
   Endure: { kind: "endure", streak: true },
+  // Magic Coat: status moves at it go back to their user, until its next turn
+  "Magic Coat": { kind: "bounce" },
+  // reactions with a trigger, BEFORE the attack lands (the popup like Protect; the move is used for real):
+  //   Sucker Punch / Thunderclap: "Quando alvo de um Move danoso ... atacar antes que seu dano seja rolado"
+  //   (Sucker Punch runs up to it when it's within its movement); Baby-Doll Eyes (melee), Tearful Look
+  //   (single-target attack): −Ataque on the attacker; Withdraw (melee): +1 Defesa before the damage
+  "Sucker Punch": { kind: "react", need: "damaging", reach: "move" },
+  Thunderclap: { kind: "react", need: "damaging", reach: 30 },
+  "Baby-Doll Eyes": { kind: "react", need: "melee", reach: 9 },
+  "Tearful Look": { kind: "react", need: "single", reach: 15 },
+  Withdraw: { kind: "react", need: "melee", self: true },
+};
+// reactions AFTER being hit (asked once the damage is written): Counter (melee), Mirror Coat (ranged),
+// Metal Burst / Comeuppance (any damaging move), Spite (any move: drains PP of that move)
+export const AFTER_HIT = {
+  Counter: { need: "melee", reach: "move" }, "Mirror Coat": { need: "ranged", reach: 30 },
+  "Metal Burst": { need: "damaging", reach: 12 }, Comeuppance: { need: "damaging", reach: "move" }, Spite: { need: "any", reach: 9 },
 };
 const KIND_PT = {
   single: "Moves de alvo único", singleDamage: "Moves danosos de alvo único", wide: "Moves em área",
@@ -72,6 +89,7 @@ export function moveProfile(rules, move, raw, targets, area) {
     status: !move.damage && !self,
     priority: priorityOf(raw) > 0,
     melee: move.rangeInfo?.kind === "melee",
+    attack: move.attackBonus != null,
   };
 }
 
@@ -88,13 +106,28 @@ async function covers(prot, P, T, mp) {
   return false;
 }
 
+// how far P reaches the attacker with a reaction: a number of meters, or "move" (its movement + reach)
+async function reaches(rules, P, attacker, reach) {
+  if (!attacker) return false;
+  const ps = getSheet(P);
+  const sp = rules.speeds(ps.pkmn);
+  const m = reach === "move" ? Math.max(sp.walk, sp.fly) + rules.reach(ps.pkmn) : reach;
+  return (await distanceMeters(P, attacker)) <= m + 0.05;
+}
+
 // Pokémon of this team that could protect T with `name` now (the kind of move matters)
-async function couldUse(rules, name, P, T, mp) {
+async function couldUse(rules, name, P, T, mp, attacker = null) {
   const d = DEFENSES[name];
   const ps = getSheet(P);
   if (!canDefend(rules, ps, name)) return false;
   const sameTeam = P.id === T.id || allies(ps, getSheet(T));
   if (!sameTeam) return false;
+  if (d.kind === "bounce") return P.id === T.id && mp.status;
+  if (d.kind === "react") {
+    if (P.id !== T.id) return false; // only the one being targeted
+    const ok = d.need === "damaging" ? mp.damaging : d.need === "melee" ? mp.melee && (mp.damaging || mp.attack) : d.need === "single" ? mp.single && mp.attack : false;
+    return ok && (d.self || (await reaches(rules, P, attacker, d.reach)));
+  }
   if (d.kind === "upper") {
     if (!mp.priority) return false;
     // "um aliado dentro do alcance de seu deslocamento"
@@ -140,6 +173,27 @@ async function ask(asks, attackerItem, moveLabel) {
   }
   for (const id of ids) await updateSheet(id, (s) => { if (s.battle.defenseAsk?.req === req) delete s.battle.defenseAsk; });
   return answers;
+}
+
+// ------------------------------------------------------------------ reactions after being hit
+// Counter / Mirror Coat / Metal Burst / Comeuppance hit back (fixed damage from what it took), Spite
+// drains PP of the move. targets: the ones the move damaged (or hit, for Spite).
+export async function afterHitReactions(rules, attackerItem, move, targets) {
+  const asks = [];
+  const melee = move.rangeInfo?.kind === "melee";
+  for (const T of targets) {
+    const ts = getSheet(T);
+    if (!ts || ts.pkmn.hp.current <= 0 || allies(ts, getSheet(attackerItem))) continue;
+    const options = [];
+    for (const [name, d] of Object.entries(AFTER_HIT)) {
+      if (!canDefend(rules, ts, name)) continue;
+      const ok = d.need === "melee" ? melee && move.damage : d.need === "ranged" ? !melee && move.damage : d.need === "damaging" ? !!move.damage : true;
+      if (ok && (await reaches(rules, T, attackerItem, d.reach))) options.push(name);
+    }
+    if (options.length) asks.push({ P: T, options, targets: [attackerItem], kind: "after" });
+  }
+  if (!asks.length) return new Map();
+  return ask(asks, attackerItem, `acertou com ${move.label.replace(/ PMP$/, "")}`);
 }
 
 // ------------------------------------------------------------------ reactions to a switch
@@ -197,7 +251,7 @@ export async function defenses(rules, { attackerItem, move, raw, targets, area }
     if (covered.has(t.id)) continue;
     for (const P of team(t)) {
       for (const name of Object.keys(DEFENSES)) {
-        if (await couldUse(rules, name, P, t, mp)) {
+        if (await couldUse(rules, name, P, t, mp, attackerItem)) {
           const e = byP.get(P.id) ?? { P, options: new Set(), targets: [] };
           e.options.add(name);
           if (!e.targets.some((x) => x.id === t.id)) e.targets.push(t);
@@ -230,6 +284,12 @@ export async function defenses(rules, { attackerItem, move, raw, targets, area }
     for (const t of hostile) {
       if (!covered.has(t.id) && await covers({ move: ans.move }, fresh, t, mp)) covered.set(t.id, { by: fresh, move: ans.move });
     }
+  }
+
+  // a reaction before the attack (Sucker Punch, Thunderclap...) knocked the attacker out: no attack
+  if ([...answers.values()].some((a) => a.status === "done" && DEFENSES[a.move]?.kind === "react")) {
+    const a2 = (await OBR.scene.items.getItems([attackerItem.id]))[0];
+    if (!a2 || getSheet(a2)?.pkmn.hp.current <= 0) { out.canceled = `${attackerItem.name} desmaiou antes de atacar`; return out; }
   }
 
   // 4) blocked targets, and what touching them costs the attacker
@@ -322,6 +382,12 @@ export const defenseText = (name) => {
   if (!d) return "";
   if (d.kind === "upper") return "contra-ataca; se acertar, atordoa e cancela o ataque";
   if (d.kind === "endure") return "fica com 1 HP em vez de desmaiar, até o seu próximo turno";
+  if (d.kind === "bounce") return "Moves de status contra você voltam pra quem usou, até o seu próximo turno";
+  if (d.kind === "react") return {
+    "Sucker Punch": "ataca antes (corre até ele se estiver no seu deslocamento)", Thunderclap: "ataca antes, à distância",
+    "Baby-Doll Eyes": "−1 Ataque em quem ataca (disputa)", "Tearful Look": "−1 Ataque e Ataque Especial em quem ataca (disputa)",
+    Withdraw: "+1 Defesa antes do golpe",
+  }[name] ?? "reage antes do golpe";
   const c = d.contact;
   const touch = !c ? "" : c.damageLevel ? "; quem atacar corpo a corpo toma dano igual ao nível"
     : c.status ? `; quem atacar corpo a corpo fica ${CONDITIONS[c.status].label.toLowerCase()}`

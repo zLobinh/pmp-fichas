@@ -1,96 +1,118 @@
-// The battlefield: weather, terrain and the effects that sit on a side of the field (screens,
-// Safeguard, Mist, Tailwind) or on the whole field (Trick Room). Kept in the scene metadata so every
-// browser reads the same thing; durations count in Pretty Sordid rounds ("5 rodadas").
-//
-// The book centres weather and terrain on the user (15 m / 12 m); the extension treats them as
-// covering the whole fight, which is how they are used at the table almost always.
-import { OBR, SHEET_KEY } from "./store.js?v=0.9.10";
+// The battlefield as AREAS on the map: weather, terrain, screens (Reflect, Light Screen, Aurora Veil),
+// Safeguard, Mist, Tailwind, hazards (Spikes, Stealth Rock, Toxic Spikes, Sticky Web) and the vortices
+// of Whirlpool / Fire Spin / Sand Tomb... Each one is a circle (shape item, DRAWING layer) with
+// metadata[AREA_KEY] = { kind, effect, move, by, byId, team, r (meters), left (rounds), until (round) }.
+//   - weather and Tailwind follow the user ("sempre centrado em você e acompanhando seus movimentos");
+//     terrain, screens, Safeguard, Mist stay where they were made; hazards sit on a point (draggable);
+//     vortices sit under the target.
+//   - the effects count only for who is inside (fieldNow(…, item));
+//   - an area with a duration joins Pretty Sordid right after its user, "Sunny Day (5)": on its turn
+//     the count goes down (areaTurn) and at 0 it disappears. Out of combat it runs out by the round.
+// Trick Room has no area: it stays in the scene metadata (FIELD_KEY).
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.11";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
+export const AREA_KEY = `${ID}/area`;
 const ROUND_KEY = "com.pretty-initiative/roundCount";
+const PRETTY = "com.pretty-initiative/metadata";
 
 export const WEATHER = {
-  rain: { label: "Chuva", icon: "🌧️" },
-  sun: { label: "Luz solar intensa", icon: "☀️" },
-  sand: { label: "Tempestade de areia", icon: "🌪️" },
-  hail: { label: "Granizo", icon: "🌨️" },
-  snow: { label: "Neve", icon: "❄️" },
+  rain: { label: "Chuva", icon: "🌧️", color: "#3b82f6" },
+  sun: { label: "Luz solar intensa", icon: "☀️", color: "#f59e0b" },
+  sand: { label: "Tempestade de areia", icon: "🌪️", color: "#b08d57" },
+  hail: { label: "Granizo", icon: "🌨️", color: "#93c5fd" },
+  snow: { label: "Neve", icon: "❄️", color: "#e0f2fe" },
 };
 export const TERRAIN = {
-  electric: { label: "Electric Terrain", type: "Electric", icon: "⚡" },
-  grassy: { label: "Grassy Terrain", type: "Grass", icon: "🌿" },
-  misty: { label: "Misty Terrain", type: "Fairy", icon: "🌫️" },
-  psychic: { label: "Psychic Terrain", type: "Psychic", icon: "🔮" },
+  electric: { label: "Electric Terrain", type: "Electric", icon: "⚡", color: "#facc15" },
+  grassy: { label: "Grassy Terrain", type: "Grass", icon: "🌿", color: "#22c55e" },
+  misty: { label: "Misty Terrain", type: "Fairy", icon: "🌫️", color: "#f9a8d4" },
+  psychic: { label: "Psychic Terrain", type: "Psychic", icon: "🔮", color: "#c084fc" },
 };
-// effects on one side (team); "half" = the screens' damage halving
 export const SIDE = {
-  reflect: { label: "Reflect", icon: "🟦" },
-  lightScreen: { label: "Light Screen", icon: "🟨" },
-  auroraVeil: { label: "Aurora Veil", icon: "🌈" },
-  safeguard: { label: "Safeguard", icon: "🛡️" },
-  mist: { label: "Mist", icon: "💨" },
-  tailwind: { label: "Tailwind", icon: "🍃" },
+  reflect: { label: "Reflect", icon: "🟦", color: "#60a5fa" },
+  lightScreen: { label: "Light Screen", icon: "🟨", color: "#fde047" },
+  auroraVeil: { label: "Aurora Veil", icon: "🌈", color: "#a5f3fc" },
+  safeguard: { label: "Safeguard", icon: "🛡️", color: "#a7f3d0" },
+  mist: { label: "Mist", icon: "💨", color: "#e5e7eb" },
+  tailwind: { label: "Tailwind", icon: "🍃", color: "#86efac" },
 };
+export const HAZARD = {
+  spikes: { label: "Spikes", icon: "📌", color: "#9ca3af" },
+  toxicSpikes: { label: "Toxic Spikes", icon: "☠️", color: "#a855f7" },
+  stealthRock: { label: "Stealth Rock", icon: "🪨", color: "#a16207" },
+  stickyWeb: { label: "Sticky Web", icon: "🕸️", color: "#d1d5db" },
+};
+export const VORTEX_COLOR = { Water: "#0ea5e9", Fire: "#ef4444", Ground: "#ca8a04", Bug: "#84cc16" };
 
-// moves that start these (and how many rounds they last)
+// moves that make an area: radius in meters, follow = attached to the user, at = "user" | "target"
 export const FIELD_MOVES = {
-  "Rain Dance": { weather: "rain", rounds: 5 }, "Sunny Day": { weather: "sun", rounds: 5 },
-  Sandstorm: { weather: "sand", rounds: 5 }, Hail: { weather: "hail", rounds: 5 }, Snowscape: { weather: "snow", rounds: 5 },
-  "Chilly Reception": { weather: "snow", rounds: 5 },
-  "Electric Terrain": { terrain: "electric", rounds: 5 }, "Grassy Terrain": { terrain: "grassy", rounds: 5 },
-  "Misty Terrain": { terrain: "misty", rounds: 5 }, "Psychic Terrain": { terrain: "psychic", rounds: 5 },
-  Reflect: { side: "reflect", rounds: 5 }, "Light Screen": { side: "lightScreen", rounds: 5 },
-  "Aurora Veil": { side: "auroraVeil", rounds: 5, needs: ["hail", "snow"] },
-  Safeguard: { side: "safeguard", rounds: 5 }, Mist: { side: "mist", rounds: 5 }, Tailwind: { side: "tailwind", rounds: 4 },
+  "Rain Dance": { weather: "rain", rounds: 5, r: 15, follow: true }, "Sunny Day": { weather: "sun", rounds: 5, r: 15, follow: true },
+  Sandstorm: { weather: "sand", rounds: 5, r: 15, follow: true }, Hail: { weather: "hail", rounds: 5, r: 15, follow: true },
+  Snowscape: { weather: "snow", rounds: 5, r: 15, follow: true }, "Chilly Reception": { weather: "snow", rounds: 5, r: 15, follow: true },
+  "Electric Terrain": { terrain: "electric", rounds: 5, r: 12 }, "Grassy Terrain": { terrain: "grassy", rounds: 5, r: 12 },
+  "Misty Terrain": { terrain: "misty", rounds: 5, r: 12 }, "Psychic Terrain": { terrain: "psychic", rounds: 5, r: 12 },
+  Reflect: { side: "reflect", rounds: 5, r: 4.5 }, "Light Screen": { side: "lightScreen", rounds: 5, r: 4.5 },
+  "Aurora Veil": { side: "auroraVeil", rounds: 5, r: 6, needs: ["hail", "snow"] },
+  Safeguard: { side: "safeguard", rounds: 5, r: 6 }, Mist: { side: "mist", rounds: 5, r: 9 },
+  Tailwind: { side: "tailwind", rounds: 4, r: 15, follow: true },
+  Spikes: { hazard: "spikes", r: 6, at: "target" }, "Toxic Spikes": { hazard: "toxicSpikes", r: 6, at: "target" },
+  "Stealth Rock": { hazard: "stealthRock", r: 6, at: "target" }, "Sticky Web": { hazard: "stickyWeb", r: 6, at: "target" },
   "Trick Room": { trickRoom: true, rounds: 5 },
 };
+// "um redemoinho surge abaixo da criatura em um círculo de 1,5 m ... por 5 rodadas"
+export const VORTEX_MOVES = { Whirlpool: "Water", "Fire Spin": "Fire", "Sand Tomb": "Ground", Infestation: "Bug", "Magma Storm": "Fire", "G-Max Sandblast": "Ground" };
 // abilities that set the weather/terrain when the Pokémon comes in
 export const FIELD_ABILITIES = {
-  Drizzle: { weather: "rain" }, Drought: { weather: "sun" }, "Orichalcum Pulse": { weather: "sun" },
-  "Sand Stream": { weather: "sand" }, "Snow Warning": { weather: "hail" },
-  "Electric Surge": { terrain: "electric" }, "Hadron Engine": { terrain: "electric" }, "Grassy Surge": { terrain: "grassy" },
-  "Misty Surge": { terrain: "misty" }, "Psychic Surge": { terrain: "psychic" },
+  Drizzle: { weather: "rain", r: 15, follow: true }, Drought: { weather: "sun", r: 15, follow: true }, "Orichalcum Pulse": { weather: "sun", r: 15, follow: true },
+  "Sand Stream": { weather: "sand", r: 15, follow: true }, "Snow Warning": { weather: "hail", r: 15, follow: true },
+  "Electric Surge": { terrain: "electric", r: 12 }, "Hadron Engine": { terrain: "electric", r: 12 }, "Grassy Surge": { terrain: "grassy", r: 12 },
+  "Misty Surge": { terrain: "misty", r: 12 }, "Psychic Surge": { terrain: "psychic", r: 12 },
 };
 
 export const roundNow = async () => Number((await OBR.scene.getMetadata())[ROUND_KEY] ?? 1);
+export const areaOf = (item) => item?.metadata?.[AREA_KEY] ?? null;
+const live = (e, round) => !!e && (e.until == null || round < e.until);
+const areaLive = (a, round) => (a.left == null || a.left > 0) && (a.inInit || a.until == null || round < a.until);
 
-// a copy kept in memory for the code that can't wait (movement): updated on every scene change
-let cache = { f: {}, round: 1 };
-let hooked = false;
-function hook() {
-  if (hooked) return;
-  hooked = true;
-  try {
-    OBR.scene.onMetadataChange((m) => { cache = { f: m[FIELD_KEY] ?? {}, round: Number(m[ROUND_KEY] ?? 1) }; });
-    OBR.scene.getMetadata().then((m) => { cache = { f: m[FIELD_KEY] ?? {}, round: Number(m[ROUND_KEY] ?? 1) }; }).catch(() => {});
-  } catch { hooked = false; }
+// grid geometry: meters per cell and pixels per cell along x (isometric grids aren't square)
+let geo = null;
+async function geometry() {
+  if (geo) return geo;
+  const [dpi, scale, d] = await Promise.all([OBR.scene.grid.getDpi(), OBR.scene.grid.getScale(), OBR.scene.grid.getDistance({ x: 0, y: 0 }, { x: 1000, y: 0 })]);
+  const unit = { m: 1, ft: 0.3048, km: 1000, mi: 1609.34 }[scale.parsed?.unit?.toLowerCase?.()] ?? 1;
+  geo = { dpi, cellM: (scale.parsed?.multiplier ?? 1.5) * unit, pxPerCell: d > 0 ? 1000 / d : dpi };
+  return geo;
 }
-export function fieldCached() {
-  hook();
-  const { f, round } = cache;
-  const sides = {};
-  for (const [team, eff] of Object.entries(f.sides ?? {})) { sides[team] = {}; for (const [k, e] of Object.entries(eff)) if (live(e, round)) sides[team][k] = true; }
-  return { weather: live(f.weather, round) ? f.weather.kind : null, terrain: live(f.terrain, round) ? f.terrain.kind : null, sides, trickRoom: live(f.trickRoom, round), raw: f, round };
+async function metersBetween(p, q) {
+  const g = await geometry();
+  return (await OBR.scene.grid.getDistance(p, q)) * g.cellM;
 }
+// inside: the creature's center within the radius (+ ½ square: "ocupando total ou parcialmente")
+const inside = (d, a) => d <= a.r + 0.75 + 0.05;
 
+export async function getAreas() {
+  return OBR.scene.items.getItems((i) => !!i.metadata?.[AREA_KEY]);
+}
 export async function getField() {
   hook();
-  const m = await OBR.scene.getMetadata();
-  cache = { f: m[FIELD_KEY] ?? {}, round: Number(m[ROUND_KEY] ?? 1) };
-  return m[FIELD_KEY] ?? {};
-}
-async function setField(f) {
-  await OBR.scene.setMetadata({ [FIELD_KEY]: f });
+  return (await OBR.scene.getMetadata())[FIELD_KEY] ?? {};
 }
 
-const live = (e, round) => !!e && (e.until == null || round < e.until);
-
-// what is active now: { weather, terrain, sides: { team: { reflect: true, ... } }, trickRoom }
+// What counts here. With an item: only the areas it stands in; without: everything on the map (HUD).
+// { weather, terrain, sides: { team: { reflect, ... } }, hazards: [...], vortex: [...], trickRoom, raw, round, areas }
 // Air Lock / Cloud Nine on the field switch the weather off while they are there.
-export async function fieldNow(f = null, round = null) {
+export async function fieldNow(f = null, round = null, item = null) {
   f ??= await getField();
   round ??= await roundNow();
-  let weather = live(f.weather, round) ? f.weather.kind : null;
+  const areas = (await getAreas()).filter((a) => areaLive(areaOf(a), round));
+  const here = [];
+  for (const a of areas) {
+    if (!item) { here.push(a); continue; }
+    if (inside(await metersBetween(a.position, item.position), areaOf(a))) here.push(a);
+  }
+  const latest = (list) => list.sort((x, y) => (areaOf(x).at ?? 0) - (areaOf(y).at ?? 0)).pop();
+  let weather = areaOf(latest(here.filter((a) => areaOf(a).kind === "weather")))?.effect ?? null;
   if (weather) {
     const lock = await OBR.scene.items.getItems((i) => {
       const s = i.metadata?.[SHEET_KEY];
@@ -100,94 +122,257 @@ export async function fieldNow(f = null, round = null) {
     });
     if (lock.length) weather = null;
   }
+  const terrain = areaOf(latest(here.filter((a) => areaOf(a).kind === "terrain")))?.effect ?? null;
   const sides = {};
-  for (const [team, eff] of Object.entries(f.sides ?? {})) {
-    sides[team] = {};
-    for (const [k, e] of Object.entries(eff)) if (live(e, round)) sides[team][k] = true;
+  for (const a of here.filter((x) => areaOf(x).kind === "side")) {
+    const m = areaOf(a);
+    sides[m.team] ??= {};
+    sides[m.team][m.effect] = true;
   }
-  return { weather, terrain: live(f.terrain, round) ? f.terrain.kind : null, sides, trickRoom: live(f.trickRoom, round), raw: f, round };
+  return {
+    weather, terrain, sides, trickRoom: live(f.trickRoom, round), raw: f, round, areas: here,
+    hazards: here.filter((a) => areaOf(a).kind === "hazard"), vortex: here.filter((a) => areaOf(a).kind === "vortex"),
+  };
 }
 
-// starts a field effect from a move or ability. Returns a note for the log.
-export async function startField(spec, { team = null, by = "" } = {}) {
-  const f = await getField();
+// a copy in memory for the code that can't wait (movement): areas and their positions, updated on
+// every change; membership by pixel distance (close enough for Swift Swim / Tailwind)
+let cache = { areas: [], round: 1, f: {} };
+let hooked = false;
+function hook() {
+  if (hooked) return;
+  hooked = true;
+  try {
+    const keep = (items) => { cache.areas = items.filter((i) => i.metadata?.[AREA_KEY]); };
+    OBR.scene.items.onChange(keep);
+    OBR.scene.items.getItems((i) => !!i.metadata?.[AREA_KEY]).then((a) => { cache.areas = a; }).catch(() => {});
+    OBR.scene.onMetadataChange((m) => { cache.round = Number(m[ROUND_KEY] ?? 1); cache.f = m[FIELD_KEY] ?? {}; });
+    geometry().catch(() => {});
+  } catch { hooked = false; }
+}
+export function fieldCached(item = null) {
+  hook();
+  const out = { weather: null, terrain: null, sides: {}, trickRoom: live(cache.f.trickRoom, cache.round), round: cache.round, raw: cache.f };
+  const g = geo ?? { pxPerCell: 150, cellM: 1.5 };
+  for (const a of cache.areas) {
+    const m = areaOf(a);
+    if (!areaLive(m, cache.round)) continue;
+    if (item) {
+      const px = Math.hypot(a.position.x - item.position.x, a.position.y - item.position.y);
+      if (!inside((px / g.pxPerCell) * g.cellM, m)) continue;
+    }
+    if (m.kind === "weather") out.weather = m.effect;
+    if (m.kind === "terrain") out.terrain = m.effect;
+    if (m.kind === "side") { out.sides[m.team] ??= {}; out.sides[m.team][m.effect] = true; }
+  }
+  return out;
+}
+
+const labelOf = (m) => m.kind === "weather" ? WEATHER[m.effect]?.label : m.kind === "terrain" ? TERRAIN[m.effect]?.label
+  : m.kind === "side" ? SIDE[m.effect]?.label : m.kind === "hazard" ? HAZARD[m.effect]?.label : m.move;
+const iconOf = (m) => (m.kind === "weather" ? WEATHER : m.kind === "terrain" ? TERRAIN : m.kind === "side" ? SIDE : m.kind === "hazard" ? HAZARD : {})[m.effect]?.icon ?? "🌀";
+export const areaName = (m) => `${iconOf(m)} ${m.move ?? labelOf(m)}${m.left != null ? ` (${m.left})` : ""}`;
+
+// creates the area. ctx: { team, by (name), user (item), target (item), move }
+// spec: { weather | terrain | side | hazard | vortex (type) | trickRoom, rounds, r, follow, at }
+export async function startField(spec, ctx = {}) {
   const round = await roundNow();
-  const until = round + (spec.rounds ?? 5);
-  if (spec.weather) {
-    // "usar enquanto já houver ... ativa não reinicia a duração"
-    if (live(f.weather, round) && f.weather.kind === spec.weather) return `${WEATHER[spec.weather].label} já estava ativa`;
-    f.weather = { kind: spec.weather, until, by };
-    await setField(f);
-    return `${WEATHER[spec.weather].icon} ${WEATHER[spec.weather].label} por ${spec.rounds ?? 5} rodadas`;
-  }
-  if (spec.terrain) {
-    if (live(f.terrain, round) && f.terrain.kind === spec.terrain) return `${TERRAIN[spec.terrain].label} já estava ativo`;
-    f.terrain = { kind: spec.terrain, until, by };
-    await setField(f);
-    return `${TERRAIN[spec.terrain].icon} ${TERRAIN[spec.terrain].label} por ${spec.rounds ?? 5} rodadas`;
-  }
-  if (spec.side && team) {
-    f.sides ??= {};
-    f.sides[team] ??= {};
-    if (live(f.sides[team][spec.side], round)) return `${SIDE[spec.side].label} já está ativo (não reinicia)`;
-    f.sides[team][spec.side] = { until, by };
-    await setField(f);
-    return `${SIDE[spec.side].icon} ${SIDE[spec.side].label} na equipe por ${spec.rounds ?? 5} rodadas`;
-  }
   if (spec.trickRoom) {
-    if (live(f.trickRoom, round)) { delete f.trickRoom; await setField(f); return "Trick Room desfeito"; }
-    f.trickRoom = { until: until + 1, by }; // "a partir do início da próxima rodada"
-    await setField(f);
+    const f = await getField();
+    if (live(f.trickRoom, round)) { delete f.trickRoom; await OBR.scene.setMetadata({ [FIELD_KEY]: f }); return "Trick Room desfeito"; }
+    f.trickRoom = { until: round + (spec.rounds ?? 5) + 1, by: ctx.by };
+    await OBR.scene.setMetadata({ [FIELD_KEY]: f });
     return "🔄 Trick Room: a ordem de iniciativa se inverte a partir da próxima rodada (5 rodadas)";
   }
-  return "";
+  const user = ctx.user ?? null;
+  const center = spec.at === "target" && ctx.target ? ctx.target : user;
+  if (!center) return "";
+  const kind = spec.weather ? "weather" : spec.terrain ? "terrain" : spec.side ? "side" : spec.hazard ? "hazard" : spec.vortex ? "vortex" : null;
+  const effect = spec.weather ?? spec.terrain ?? spec.side ?? spec.hazard ?? spec.vortex;
+  const r = spec.r ?? (spec.vortex ? 0.75 : 6);
+  const areas = await getAreas();
+  const team = ctx.team ?? (user ? getSheet(user)?.team ?? "inimigos" : null);
+  // the same weather/terrain already over this spot: "não reinicia a duração"; another one touching
+  // it is replaced ("outro clima ativado em seguida e a área dele esteja encostada na sua")
+  const gone = [];
+  for (const a of areas) {
+    const m = areaOf(a);
+    if (m.kind !== kind || !["weather", "terrain"].includes(kind)) continue;
+    const d = await metersBetween(a.position, center.position);
+    if (d > m.r + r) continue;
+    if (m.effect === effect && d <= m.r) return `${labelOf(m)} já estava ativo aqui (não reinicia)`;
+    gone.push(a.id);
+  }
+  // screens/Safeguard/Mist of the same team already here; hazards: 2 of each per user (the oldest goes)
+  if (kind === "side") {
+    for (const a of areas) {
+      const m = areaOf(a);
+      if (m.kind === "side" && m.effect === effect && m.team === team && (await metersBetween(a.position, center.position)) <= m.r) return `${labelOf(m)} já está ativo (não reinicia)`;
+    }
+  }
+  if (kind === "hazard" && user) {
+    const mine = areas.filter((a) => areaOf(a).kind === "hazard" && areaOf(a).effect === effect && areaOf(a).byId === user.id).sort((x, y) => areaOf(x).at - areaOf(y).at);
+    if (mine.length >= 2) gone.push(mine[0].id);
+  }
+  if (gone.length) await removeAreas(gone);
+  const g = await geometry();
+  const diameter = ((2 * r) / g.cellM) * g.pxPerCell;
+  const color = kind === "weather" ? WEATHER[effect].color : kind === "terrain" ? TERRAIN[effect].color : kind === "side" ? SIDE[effect].color
+    : kind === "hazard" ? HAZARD[effect].color : VORTEX_COLOR[effect] ?? "#94a3b8";
+  const rounds = spec.rounds ?? (kind === "vortex" ? 5 : null);
+  // in Pretty Sordid right after its user (who used it, or who it was used by)
+  const uInit = user?.metadata?.[PRETTY];
+  const inInit = rounds != null && typeof uInit?.count === "string";
+  const meta = { kind, effect, move: ctx.move ?? null, by: ctx.by ?? "", byId: user?.id ?? null, team, r, left: rounds, until: rounds != null ? round + rounds : null, at: Date.now(), inInit };
+  let b = SDK.buildShape().shapeType("CIRCLE").width(diameter).height(diameter).position({ ...center.position })
+    .fillColor(color).fillOpacity(kind === "vortex" ? 0.35 : 0.14).strokeColor(color).strokeOpacity(0.9).strokeWidth(Math.max(2, g.dpi * 0.03))
+    .layer("DRAWING").name(areaName(meta)).locked(kind !== "hazard").disableHit(kind !== "hazard")
+    .metadata({ [AREA_KEY]: meta, ...(inInit ? { [PRETTY]: { count: String(Math.round((parseFloat(uInit.count) - 0.01) * 100) / 100), active: false } } : {}) });
+  if (spec.follow && user) b = b.attachedTo(user.id).disableAttachmentBehavior(["VISIBLE", "SCALE", "ROTATION", "LOCKED", "COPY"]);
+  const item = b.build();
+  await OBR.scene.items.addItems([item]);
+  if (inInit) await reorderInitiative();
+  const what = labelOf(meta);
+  return `${iconOf(meta)} ${what}${rounds != null ? ` por ${rounds} rodadas` : ""}${kind === "side" ? ` (aliados a até ${String(r).replace(".", ",")} m)` : ""}`;
 }
 
-export async function clearTerrain() {
-  const f = await getField();
-  if (!f.terrain) return false;
-  delete f.terrain;
-  await setField(f);
-  return true;
+// Pretty Sordid's order after an area joined (same sort as map.setInitiative)
+async function reorderInitiative() {
+  const ascending = (await OBR.room.getMetadata())["com.pretty-initiative/sortAscending"] === true;
+  const items = await OBR.scene.items.getItems((i) => typeof i.metadata?.[PRETTY]?.count === "string");
+  const n = (i) => parseFloat(i.metadata[PRETTY].count) || 0;
+  items.sort((a, b) => (ascending ? n(a) - n(b) : n(b) - n(a)));
+  await OBR.scene.setMetadata({ "com.pretty-initiative/order": Object.fromEntries(items.map((it, i) => [i, it.id])) });
 }
-export async function clearSide(team, keys) {
-  const f = await getField();
-  let any = false;
-  for (const k of keys) if (f.sides?.[team]?.[k]) { delete f.sides[team][k]; any = true; }
-  if (any) await setField(f);
-  return any;
+export async function removeAreas(ids) {
+  if (!ids.length) return;
+  const meta = await OBR.scene.getMetadata();
+  const order = Object.values(meta["com.pretty-initiative/order"] ?? {}).filter((id) => !ids.includes(id));
+  await OBR.scene.items.deleteItems(ids);
+  await OBR.scene.setMetadata({ "com.pretty-initiative/order": Object.fromEntries(order.map((id, i) => [i, id])) });
 }
 
-// at the start of a round: what ran out
+// its turn in the initiative: one round less; at 0 it ends. Returns a note.
+export async function areaTurn(item) {
+  const m = areaOf(item);
+  if (!m) return null;
+  const left = (m.left ?? 1) - 1;
+  if (left <= 0) { await removeAreas([item.id]); return `${labelOf(m)} acabou`; }
+  await OBR.scene.items.updateItems([item.id], (ds) => { for (const d0 of ds) { d0.metadata[AREA_KEY] = { ...d0.metadata[AREA_KEY], left }; d0.name = areaName({ ...m, left }); } });
+  return `${labelOf(m)}: falta(m) ${left} rodada(s)`;
+}
+
+export async function clearTerrain(item = null) {
+  const areas = (await getAreas()).filter((a) => areaOf(a).kind === "terrain");
+  const ids = [];
+  for (const a of areas) if (!item || inside(await metersBetween(a.position, item.position), areaOf(a))) ids.push(a.id);
+  await removeAreas(ids);
+  return ids.length > 0;
+}
+export async function clearSide(team, keys, item = null) {
+  const areas = (await getAreas()).filter((a) => areaOf(a).kind === "side" && areaOf(a).team === team && keys.includes(areaOf(a).effect));
+  const ids = [];
+  for (const a of areas) if (!item || inside(await metersBetween(a.position, item.position), areaOf(a))) ids.push(a.id);
+  await removeAreas(ids);
+  return ids.length > 0;
+}
+
+// at the start of a round: areas out of the initiative that ran out (and Trick Room)
 export async function expireField() {
-  const f = await getField();
   const round = await roundNow();
   const gone = [];
-  if (f.weather && !live(f.weather, round)) { gone.push(`${WEATHER[f.weather.kind]?.label ?? f.weather.kind} acabou`); delete f.weather; }
-  if (f.terrain && !live(f.terrain, round)) { gone.push(`${TERRAIN[f.terrain.kind]?.label ?? f.terrain.kind} acabou`); delete f.terrain; }
-  if (f.trickRoom && !live(f.trickRoom, round)) { gone.push("Trick Room acabou"); delete f.trickRoom; }
-  for (const eff of Object.values(f.sides ?? {})) {
-    for (const [k, e] of Object.entries(eff)) if (!live(e, round)) { gone.push(`${SIDE[k]?.label ?? k} acabou`); delete eff[k]; }
+  const ids = [];
+  for (const a of await getAreas()) {
+    const m = areaOf(a);
+    if (m.inInit && a.metadata?.[PRETTY]) continue; // counted on its own turn
+    if (m.until != null && round >= m.until) { ids.push(a.id); gone.push(`${labelOf(m)} acabou`); }
   }
-  if (gone.length) await setField(f);
+  await removeAreas(ids);
+  const f = await getField();
+  if (f.trickRoom && !live(f.trickRoom, round)) { delete f.trickRoom; await OBR.scene.setMetadata({ [FIELD_KEY]: f }); gone.push("Trick Room acabou"); }
   return gone;
+}
+
+// the user went back to the ball: its following areas move to who came in, or stay where they are
+export async function handOverAreas(fromItem, toItem = null) {
+  const mine = (await getAreas()).filter((a) => a.attachedTo === fromItem.id);
+  if (!mine.length) return;
+  await OBR.scene.items.updateItems(mine.map((a) => a.id), (ds) => {
+    for (const d0 of ds) {
+      if (toItem) { d0.attachedTo = toItem.id; d0.position = { ...toItem.position }; d0.metadata[AREA_KEY] = { ...d0.metadata[AREA_KEY], byId: toItem.id }; }
+      else delete d0.attachedTo;
+    }
+  });
 }
 
 // one line for the HUD / panel
 export function fieldText(now) {
   const parts = [];
-  const left = (e) => (e?.until != null ? ` (${Math.max(0, e.until - now.round)} rod.)` : "");
-  if (now.weather) parts.push(`${WEATHER[now.weather].icon} ${WEATHER[now.weather].label}${left(now.raw.weather)}`);
-  if (now.terrain) parts.push(`${TERRAIN[now.terrain].icon} ${TERRAIN[now.terrain].label}${left(now.raw.terrain)}`);
+  for (const a of now.areas ?? []) parts.push(areaName(areaOf(a)));
   if (now.trickRoom) parts.push("🔄 Trick Room");
-  for (const [team, eff] of Object.entries(now.sides)) {
-    const ks = Object.keys(eff);
-    if (ks.length) parts.push(`${team}: ${ks.map((k) => SIDE[k]?.label ?? k).join(", ")}`);
-  }
-  return parts.join(" · ");
+  return [...new Set(parts)].join(" · ");
 }
 
 // "no chão": not flying and not floating (Levitate, Magnet Rise)
 export function grounded(sheet, abilities) {
   return !(Number(sheet?.battle?.alt) > 0) && !abilities.includes("Levitate") && !sheet?.battle?.magnetRise;
+}
+
+// ------------------------------------------------------------------ walking into hazards and vortices
+// "Sempre que uma criatura entrar nessa área, ou quando um Pokémon for substituído e o próximo surgir
+// dentro dela": from (null = it just appeared) -> to. Vortices: entering or leaving hurts (once a turn).
+export async function hazardsOnMove(rules, item, from, to, { giveCondition, addStage } = {}) {
+  const s = getSheet(item);
+  if (!s || s.ball || s.pkmn.hp.current <= 0) return [];
+  const notes = [];
+  const types = rules.types(s.pkmn);
+  const ab = s.battle?.ability ? [s.battle.ability] : rules.abilities(s.pkmn);
+  const up = Number(s.battle?.alt) > 0 || ab.includes("Levitate") || s.battle?.magnetRise;
+  const lvl = rules.level(s.pkmn);
+  const half = Math.max(2, Math.ceil(lvl / 2));
+  const ops = [];
+  for (const a of await getAreas()) {
+    const m = areaOf(a);
+    if (m.kind !== "hazard" && m.kind !== "vortex") continue;
+    const was = from ? inside(await metersBetween(a.position, from), m) : false;
+    const now = inside(await metersBetween(a.position, to), m);
+    if (m.kind === "hazard" && !was && now) {
+      if (m.effect === "spikes" && !up && !types.includes("Flying")) ops.push({ dmg: half, note: `📌 Spikes: −${half} HP` });
+      if (m.effect === "stealthRock") { const e = rules.effectiveness("Rock", s.pkmn); const n = Math.floor(half * e); ops.push({ dmg: n, note: `🪨 Stealth Rock: −${n} HP` }); }
+      if (m.effect === "toxicSpikes" && !up && !types.includes("Flying")) ops.push({ give: m.strong ? "BadlyPoisoned" : "Poisoned", note: "☠️ Toxic Spikes" });
+      if (m.effect === "stickyWeb" && !up && !types.includes("Flying")) ops.push({ stage: { stat: "Speed", delta: -1 }, note: "🕸️ Sticky Web: Velocidade −1" });
+    }
+    if (m.kind === "vortex" && from && was !== now) {
+      const turn = s.battle?.turns ?? 0;
+      if (s.battle?.vortexHurt !== turn) {
+        const e = rules.effectiveness(m.effect, s.pkmn);
+        const n = Math.floor(half * e);
+        ops.push({ dmg: n, vortexTurn: turn, note: `🌀 ${m.move ?? "redemoinho"} (${now ? "entrou" : "saiu"}): −${n} HP` });
+      }
+    }
+  }
+  if (!ops.length) return notes;
+  if (ab.includes("Magic Guard")) for (const o of ops) delete o.dmg;
+  await updateSheet(item.id, (sh) => {
+    for (const o of ops) {
+      if (o.dmg) sh.pkmn.hp.current = Math.max(0, sh.pkmn.hp.current - o.dmg);
+      if (o.vortexTurn != null) sh.battle.vortexHurt = o.vortexTurn;
+      if (o.give && giveCondition) { const r0 = giveCondition(sh, o.give, rules, {}); notes.push(r0.ok ? o.note : `${o.note}: ${r0.reason}`); continue; }
+      if (o.stage && addStage) addStage(sh.pkmn, o.stage.stat, o.stage.delta);
+      if (o.note) notes.push(o.note);
+    }
+  });
+  if (notes.length) await pushLog({ kind: "note", attacker: item.name, text: notes.join("; ") });
+  return notes;
+}
+// end of its own turn inside a vortex: half its level, untyped
+export async function vortexEndTurn(rules, item) {
+  const s = getSheet(item);
+  if (!s || s.pkmn.hp.current <= 0) return null;
+  for (const a of await getAreas()) {
+    const m = areaOf(a);
+    if (m.kind !== "vortex" || !areaLive(m, await roundNow())) continue;
+    if (inside(await metersBetween(a.position, item.position), m)) return { amount: Math.max(2, Math.ceil(rules.level(s.pkmn) / 2)), move: m.move };
+  }
+  return null;
 }

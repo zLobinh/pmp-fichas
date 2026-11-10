@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.10";
-import { fmtM } from "./rules.js?v=0.9.10";
-import { getRoller } from "./dice.js?v=0.9.10";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.11";
+import { fmtM } from "./rules.js?v=0.9.11";
+import { getRoller } from "./dice.js?v=0.9.11";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -140,9 +140,9 @@ export async function rollInitiative(rules, item) {
   // Velocidade: + stage x proficiency (pág. 73)
   // abilities and weather: Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Unburden (+2× prof.),
   // Quick Feet (×1,5, ignores paralysis), Slow Start (½), Stall (always last)
-  const { initiativeMods } = await import("./abilities.js?v=0.9.10");
-  const { fieldNow } = await import("./field.js?v=0.9.10");
-  const im = initiativeMods(rules, sheet, await fieldNow().catch(() => ({})));
+  const { initiativeMods } = await import("./abilities.js?v=0.9.11");
+  const { fieldNow } = await import("./field.js?v=0.9.11");
+  const im = initiativeMods(rules, sheet, await fieldNow(null, null, item).catch(() => ({})));
   const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn) + im.add;
   const settings = await getSettings();
   const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });

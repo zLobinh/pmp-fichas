@@ -2,11 +2,11 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.10";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.10";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode } from "./trainer.js?v=0.9.10";
-import { distanceMeters } from "./map.js?v=0.9.10";
-import { longRest } from "./qol.js?v=0.9.10";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.11";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.11";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode, refreshTokens } from "./trainer.js?v=0.9.11";
+import { distanceMeters } from "./map.js?v=0.9.11";
+import { longRest } from "./qol.js?v=0.9.11";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");
@@ -257,6 +257,8 @@ function render() {
     h("div", { class: "tc-actions" },
       state.list.length < MAX_PARTY ? h("button", { class: "small", disabled: state.busy, title: "Selecione no mapa os tokens dos Pokémon (com ficha) e clique aqui", onclick: absorbSelected }, "Guardar os selecionados") : null,
       state.list.length ? h("button", { class: "small primary", disabled: state.busy, title: "Fora do combate: HP e PP cheios, condições e estágios limpos (a equipe toda)", onclick: doRest }, "Descanso longo") : null,
+      state.list.length ? h("button", { class: "small", disabled: state.busy, title: "Sprite certo (forma, Mega, fêmea) e tamanho do PMP em toda a equipe, sem recriar os tokens",
+        onclick: () => act(async () => { const n = await refreshTokens(state.rules, state.list); state.msg = `${n} Pokémon atualizado(s).`; }) }, "Atualizar sprites") : null,
       h("span", { class: "spacer" }),
       h("button", { class: "small", disabled: state.busy, title: "O token deixa de ser treinador (precisa liberar os guardados antes)", onclick: () => act(async () => { await unmakeTrainer(state.trainer); OBR.popover.close(POP); }) }, "Deixar de ser treinador"))));
   requestAnimationFrame(() => OBR.popover.setHeight(POP, Math.min(700, Math.ceil(root.getBoundingClientRect().height) + 4)).catch(() => {}));

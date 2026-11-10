@@ -1,15 +1,15 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.10";
-import { describe } from "./combat.js?v=0.9.10";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.10";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.10";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.10";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.10";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.10";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.10";
-import { runPrepared } from "./prepared.js?v=0.9.10";
-import { loadRules } from "./store.js?v=0.9.10";
-import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.10";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.11";
+import { describe } from "./combat.js?v=0.9.11";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.11";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.11";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.11";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.11";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.11";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.11";
+import { runPrepared } from "./prepared.js?v=0.9.11";
+import { loadRules } from "./store.js?v=0.9.11";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.11";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -135,12 +135,43 @@ OBR.onReady(() => {
       const rules = await loadRules();
       // (players only resize their own Pokémon)
       const ids = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id)).map((i) => i.id);
-      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.10");
+      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.11");
       const cellM = await cellMeters();
       await OBR.scene.items.updateItems(ids, (ds) => {
         for (const d0 of ds) { const s = d0.metadata[SHEET_KEY]; fitDraft(d0, tokenCells(rules, s.pkmn, cellM), s); }
       });
       OBR.notification.show(`Tamanho ajustado: ${ids.length} token(s)`, "SUCCESS");
+    },
+  });
+  // tokens already on the map: the right sprite (form, Mega, female) and size, without recreating them
+  OBR.contextMenu.create({
+    id: `${ID}/refresh-sprite`,
+    icons: [{
+      icon: asset("icons/pokeball.svg"),
+      label: "Atualizar sprite e tamanho (PMP)",
+      filter: { every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      const items = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id));
+      try {
+        const { refreshTokens } = await import("./trainer.js?v=0.9.11");
+        const n = await refreshTokens(await loadRules(), items);
+        OBR.notification.show(`Atualizado: ${n} token(s)`, "SUCCESS");
+      } catch (e) { OBR.notification.show(e.message, "ERROR"); }
+    },
+  });
+  // a new export code into a token that already has a sheet: keeps owner, team, trainer and battle
+  OBR.contextMenu.create({
+    id: `${ID}/reimport`,
+    icons: [{
+      icon: asset("icons/import.svg"),
+      label: "Reimportar ficha (mantém o resto)",
+      filter: { max: 1, every: [{ key: "type", value: "IMAGE" }, { key: ["metadata", SHEET_KEY], value: undefined, operator: "!=" }] },
+    }],
+    onClick: async (context) => {
+      const it = context.items[0];
+      if (!(viewer.role === "GM" || getSheet(it)?.owner === viewer.id)) return OBR.notification.show("Essa ficha não é sua.", "WARNING");
+      OBR.modal.open({ id: `${ID}/import`, url: asset(`import.html?id=${encodeURIComponent(it.id)}&re=1`), width: 480, height: 460 });
     },
   });
 

@@ -4,25 +4,25 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.10";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.10";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.10";
-import { getRoller } from "./dice.js?v=0.9.10";
-import { defenses, endure } from "./protect.js?v=0.9.10";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.10";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.11";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.11";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.11";
+import { getRoller } from "./dice.js?v=0.9.11";
+import { defenses, endure } from "./protect.js?v=0.9.11";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.11";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.10";
+} from "./battle.js?v=0.9.11";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.10";
+} from "./tactics.js?v=0.9.11";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.10";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.10";
-import * as MFX from "./movefx.js?v=0.9.10";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.11";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.11";
+import * as MFX from "./movefx.js?v=0.9.11";
 
 export { TurnError };
 
@@ -71,7 +71,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const mfx = MFX.special(moveName, raw);
   // healing moves: their dice heal (movefx), they don't deal damage
   if (mfx.heal && !raw.atk && !raw.Save) move.damage = null;
-  const field = await fieldNow();
+  const field = await fieldNow(null, null, attackerItem);
   const round = field.round;
   const onField = await OBR.scene.items.getItems((i) => i.id !== attackerItem.id && getSheet(i) && !getSheet(i).ball && getSheet(i).pkmn.hp.current > 0);
   const gas = [aSheet, ...onField.map(getSheet)].some((s) => abilitiesOf(rules, s).includes("Neutralizing Gas"));
@@ -271,6 +271,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     entry.notes.push(...guard.notes);
     for (const b of guard.blocked) entry.results.push({ target: null, note: b.note });
     targetItems = targetItems.filter((t) => !guard.blocked.some((b) => b.id === t.id));
+    // the reactions may have changed them (Withdraw +1 Defesa, Magic Coat up, a Sucker Punch hit)
+    if (targetItems.length) {
+      const fresh = await OBR.scene.items.getItems(targetItems.map((t) => t.id));
+      targetItems = targetItems.map((t) => fresh.find((f) => f.id === t.id) ?? t);
+    }
     if (guard.canceled || !targetItems.length) {
       // the move was still used: PP and the action are gone
       await updateSheet(attackerItem.id, (s) => {
@@ -417,6 +422,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const priority = Number(/Prioridade\s*(-?\d)/i.exec(raw.Description ?? "")?.[1] ?? 0);
   // distances from each target to the others (Friend Guard, Armor Tail, the Ruin abilities)
   const distTo = new Map();
+  // the field where each target stands (screens, Safeguard, Mist, terrain, weather around it)
+  const tFields = new Map();
+  for (const t of new Set(seq.map((x) => x.t))) tFields.set(t.id, await fieldNow(null, null, t));
   for (const t of new Set(seq.map((x) => x.t))) {
     const m = new Map();
     for (const o of others) m.set(o.item.id, o.item.id === t.id ? 0 : await distanceMeters(t, o.item));
@@ -638,7 +646,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // abilities and field after the type: Thick Fat, Fur Coat, Fluffy...; Defeatist; Solar Beam in the rain
       final = Math.floor(final * p.tm.mult * uDice.finalMult * (aMods.halveFinal ? 0.5 : 1));
       // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores)
-      const side = p.tSheet && field.sides?.[teamOf(p.tSheet)];
+      const side = p.tSheet && (tFields.get(p.t.id) ?? field).sides?.[teamOf(p.tSheet)];
       if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)
         && ((melee && side.reflect) || (!melee && side.lightScreen) || side.auroraVeil)) {
         final = Math.floor(final / 2);
@@ -735,6 +743,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (moveName === "Smelling Salts" && landed) ch.cure = ["Paralyzed"];
     if (moveName === "Wake-Up Slap" && landed) ch.cure = ["Asleep", "Drowsy"];
     if (mfx.leaveOne) ch.leaveOne = true;
+    if (mfx.vortex && landed) ch.vortex = mfx.vortex;
+    // Wrap, Bind, Clamp, Snap Trap, Thunder Cage, Octolock: held, hurt at the end of its turns
+    if (mfx.bind && (move.save ? failed : landed)) ch.bind = { move: moveName_, by: attackerItem.id, octo: moveName === "Octolock" };
     if (mfx.restrict && (p.r.contest?.success || (!fx.contest && landed))) {
       ch.restrict = { kind: mfx.restrict, move: p.tSheet.battle?.lastMove ?? null, turns: mfx.restrict === "disable" ? 4 : 3 };
     }
@@ -974,6 +985,12 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (ch.seed) { s.battle.seeded = ch.seed; r.effects.push("🌱 semeado (Leech Seed)"); }
       if (ch.yawn) { s.battle.yawn = ch.yawn; r.effects.push("🥱 vai dormir no fim do próximo turno (Yawn)"); }
       if (ch.curse) { s.battle.cursed = true; r.effects.push("👻 amaldiçoado"); }
+      if (ch.bind && s.pkmn.hp.current > 0) {
+        s.battle.cond = conditionsOf(s);
+        s.battle.cond.Grappled = { since: s.battle.turns ?? 0, age: 0, by: ch.bind.by };
+        s.battle.bound = ch.bind;
+        r.effects.push(`🤼 preso por ${ch.bind.move} (dano no fim de cada turno dele)`);
+      }
       if (ch.clearStages) { s.pkmn.stages = {}; r.effects.push("estágios zerados"); }
       if (ch.knockOff) {
         s.battle.itemLost = true;
@@ -1006,7 +1023,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (ch.wake && dmgNow) { if (clearCondition(s, "Asleep")) r.effects.push("acordou com o crítico"); if (clearCondition(s, "Drowsy")) r.effects.push("não está mais sonolento"); }
       if (ch.thaw && dmgNow && clearCondition(s, "Frozen")) r.effects.push("descongelou com o fogo");
       // conditions: type immunity, abilities (Limber, Insomnia...), Safeguard, Misty Terrain, Substitute
-      const block = (key) => statusBlock(rules, s, key, { field, grounded: tGround, team: teamOf(s), fromOther: !self, source: { infiltrator, secondary: !!move.damage }, gas });
+      const block = (key) => statusBlock(rules, s, key, { field: tFields.get(id) ?? field, grounded: tGround, team: teamOf(s), fromOther: !self, source: { infiltrator, secondary: !!move.damage }, gas });
       for (const key of [...new Set(ch.give)]) {
         if (s.pkmn.hp.current <= 0) break;
         const res = giveCondition(s, key, rules, { ownTurn, block, corrosion: aAbil.includes("Corrosion") });
@@ -1020,7 +1037,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       }
       // stages from someone else: Clear Body, Hyper Cutter, Contrary, Simple, Mist, Defiant, Mirror Armor...
       if (ch.stages.length) {
-        const g = stageGuard(rules, s, ch.stages, { fromOther: !self, field, team: teamOf(s), infiltrator, gas });
+        const g = stageGuard(rules, s, ch.stages, { fromOther: !self, field: tFields.get(id) ?? field, team: teamOf(s), infiltrator, gas });
         for (const st of g.list) addStage(s.pkmn, st.stat, st.delta);
         if (g.list.length) r.effects.push(stageText(g.list));
         if (g.notes.length) r.effects.push(g.notes.join(", "));
@@ -1039,7 +1056,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
             if (op.stages) for (const st of op.stages) addStage(s.pkmn, st.stat, st.delta);
             if (op.give) { const res = giveCondition(s, op.give, rules, { ownTurn, block }); if (res.ok) r.effects.push(`ficou ${CONDITIONS[op.give].label}`); }
             if (op.set) Object.assign(s.battle, op.set);
-            if (op.field) fieldOps.push({ ...op.field, by: tItem?.name ?? "" });
+            if (op.field) fieldOps.push({ ...op.field, by: tItem?.name ?? "", user: tItem, ability: op.note });
             if (op.note && (op.stages || op.give || op.set || !op.field)) r.effects.push(op.note + (op.stages ? ` (${stageText(op.stages)})` : ""));
           }
           for (const op of ops.A) {
@@ -1057,8 +1074,14 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       r.hpAfter = `${after.pkmn.hp.current}/${rules.maxHP(after.pkmn)}`;
       if (after.pkmn.hp.current <= 0 && !r.effects.includes("DESMAIOU")) r.effects.push("DESMAIOU");
     }
-    if (ch.breakScreens && after) { if (await clearSide(teamOf(after), ["reflect", "lightScreen", "auroraVeil"])) entry.notes.push("as telas do alvo quebraram"); }
-    if (ch.clearTerrain) { await clearTerrain(); entry.notes.push("o terreno foi desfeito"); }
+    const tNow = (await OBR.scene.items.getItems([id]))[0];
+    if (ch.breakScreens && after) { if (await clearSide(teamOf(after), ["reflect", "lightScreen", "auroraVeil"], tNow)) entry.notes.push("as telas do alvo quebraram"); }
+    if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
+    // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
+    if (ch.vortex && tNow && !self) {
+      const n = await startField({ vortex: ch.vortex, rounds: 5, r: 0.75, at: "target" }, { user: (await OBR.scene.items.getItems([attackerItem.id]))[0], target: tNow, move: moveName_, by: who });
+      if (n) entry.notes.push(`${moveName_}: redemoinho em ${tNow.name} (5 rodadas)`);
+    }
   }
 
   // drain, recoil, the miss of Jump Kick/Supercell Slam, and what came back from the targets
@@ -1089,9 +1112,15 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   // field moves and effects on several creatures
   const fieldMove = FIELD_MOVES[moveName];
-  if (fieldMove) { const n = await startField(fieldMove, { team: teamOf(aSheet), by: who }); if (n) entry.notes.push(n); }
-  for (const op of fieldOps) { const n = await startField({ ...op, rounds: 5 }, { by: op.by }); if (n) entry.notes.push(`${op.by}: ${n}`); }
-  if (mfx.clearTerrain === "before") { await clearTerrain(); entry.notes.push("o terreno foi desfeito"); }
+  // (an area on the map: weather/Tailwind follow the user, terrain/screens stay here, hazards on the target)
+  const userNow = (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem;
+  if (fieldMove) { const n = await startField(fieldMove, { team: teamOf(aSheet), by: who, user: userNow, target: targetItems[0] ?? null, move: moveName_ }); if (n) entry.notes.push(n); }
+  for (const op of fieldOps) {
+    const spec = op.weather ? { weather: op.weather, r: 15, follow: true } : { terrain: op.terrain, r: 12 };
+    const n = await startField({ ...spec, rounds: 5 }, { by: op.by, user: op.user, move: op.ability });
+    if (n) entry.notes.push(`${op.by}: ${n}`);
+  }
+  if (mfx.clearTerrain === "before") { await clearTerrain(userNow); entry.notes.push("o terreno foi desfeito"); }
   if (mfx.fusion) { const f = await getField(); f.fusion = { move: moveName, round }; await OBR.scene.setMetadata({ "com.pmp-fichas/field": f }); }
   if (mfx.haze || mfx.cureTeam || mfx.perish) {
     const radius = mfx.haze ?? mfx.cureTeam ?? 18;
@@ -1111,7 +1140,6 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     await OBR.scene.items.updateItems([aSheet.trainer], (ds) => { for (const d0 of ds) if (d0.metadata["com.pmp-fichas/trainer"]) d0.metadata["com.pmp-fichas/trainer"] = { ...d0.metadata["com.pmp-fichas/trainer"], healingWish: true }; });
     entry.notes.push("o próximo Pokémon liberado volta com a vida cheia e sem condições");
   }
-  if (mfx.hazard) entry.notes.push(`${moveName_}: marque a área no mapa (6 m de raio); quem entrar sofre o efeito`);
 
   // switching and trapping moves (trainer.js): Dragon Tail, Roar, U-turn, Mean Look...
   await switchEffects(rules, { attackerItem, moveName, targetItems, entry });
@@ -1119,6 +1147,15 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (settings.mapFx) await sendFx(attackerItem, entry, targetItems).catch(() => {});
   // Sentinela nearby: attacking someone else gives them a reaction attack
   if (running && !opts.opportunity && (move.attackBonus != null || move.saveDC != null) && targetItems.length) await checkSentinel(rules, attackerItem, targetItems).catch(() => {});
+  // Counter / Mirror Coat / Metal Burst / Comeuppance / Spite: the ones it hit may answer (5 s popup)
+  if (running && !opts.defense && targetItems.length) {
+    const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
+    if (hitIds.size) {
+      const { afterHitReactions } = await import("./protect.js?v=0.9.11");
+      const hit = await OBR.scene.items.getItems([...hitIds]);
+      await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
+    }
+  }
   return entry;
 }
 
