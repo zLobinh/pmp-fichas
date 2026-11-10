@@ -229,6 +229,15 @@ body:has(.tcard) { background: transparent; }
 .tc-team.jogadores { border-color: #4aa3df; color: #8fcaf2; }
 .tc-team.inimigos { border-color: #e3504f; color: #f29b9a; }
 .tc-team.selvagens { border-color: #84cc16; color: #bef264; }
+
+/* "Preparar batalha" popup */
+.prep { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.prep-party { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.prep-mon { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; font-size: 11px; }
+.prep-mon img { width: 40px; height: 40px; object-fit: contain; image-rendering: pixelated; }
+.prep-mon.sel { outline: 2px solid var(--accent); background: var(--panel-2); }
+.prep-mon b { position: absolute; top: 2px; right: 4px; color: var(--accent); }
+.prep-result h2 { margin-top: 0; }
 .tc-owner { padding: 0 12px; gap: 6px; color: var(--tc-muted); }
 .tc-owner select { font-size: 11px; }
 .tc-switch { margin: 0 12px; padding: 7px 9px; border: 1px solid #ffd84a; border-radius: 8px; background: rgba(255,216,74,.08); display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }

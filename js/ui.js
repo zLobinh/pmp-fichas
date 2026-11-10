@@ -1,5 +1,5 @@
 // UI pieces shared by the pages: type colors and opening the popovers.
-import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.12";
+import { OBR, ID, HUD_ID, asset } from "./store.js?v=0.9.13";
 
 export const TYPE_COLOR = {
   Normal: "#9a9a7c", Fire: "#e2743a", Water: "#5a8de6", Grass: "#5fae4a", Electric: "#d8b41f", Ice: "#6cc4c4",
@@ -97,6 +97,23 @@ export async function openTrainer(trainerId, switchId = null) {
     anchorPosition: { left: width - 16, top: 70 },
     anchorOrigin: { horizontal: "RIGHT", vertical: "TOP" },
     transformOrigin: { horizontal: "RIGHT", vertical: "TOP" },
+    disableClickAway: true,
+  });
+}
+
+// "Preparar batalha" popup, top-center
+export const PREP_ID = `${ID}/prep`;
+export async function openPrep() {
+  const width = await OBR.viewport.getWidth();
+  return OBR.popover.open({
+    id: PREP_ID,
+    url: asset("prep.html"),
+    width: 440,
+    height: 520,
+    anchorReference: "POSITION",
+    anchorPosition: { left: width / 2, top: 70 },
+    anchorOrigin: { horizontal: "CENTER", vertical: "TOP" },
+    transformOrigin: { horizontal: "CENTER", vertical: "TOP" },
     disableClickAway: true,
   });
 }

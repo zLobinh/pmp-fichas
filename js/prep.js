@@ -7,14 +7,14 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.12";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, TEAMS } from "./battle.js?v=0.9.12";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.12";
-import { startCombat } from "./qol.js?v=0.9.12";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.12";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.12";
-import { useMove } from "./combat.js?v=0.9.12";
-import { isAreaTurn } from "./field.js?v=0.9.12";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.13";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, TEAMS } from "./battle.js?v=0.9.13";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.13";
+import { startCombat } from "./qol.js?v=0.9.13";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.13";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.13";
+import { useMove } from "./combat.js?v=0.9.13";
+import { isAreaTurn } from "./field.js?v=0.9.13";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -281,7 +281,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.12")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.13")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])

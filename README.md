@@ -211,6 +211,18 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   desce e no fim elas somem. Entrar em Spikes/Stealth Rock/Toxic Spikes/Sticky Web (andando ou saindo da
   pokébola ali) aplica o efeito; entrar ou sair de um redemoinho machuca (1x por turno) e terminar o turno
   dentro também. Na troca, o clima/Tailwind que seguia quem saiu passa a seguir quem entrou.
+- **Preparar batalha (prep.js):** selecione dois ou mais treinadores → botão direito → "Preparar batalha"
+  (o mestre). No popup o mestre escolhe os lados, o formato (1v1, 2v2, 3v3: Pokémon em campo por lado,
+  divididos entre os treinadores do lado, no máximo um ativo por treinador quando há vários), as reservas de
+  cada treinador e a arena (dois cliques no mapa; os iniciais aparecem dentro dela). Depois de "Regras
+  prontas", cada lado escolhe os iniciais no próprio popup sem ver os do outro (só "escolhendo"/"pronto").
+  Com todos prontos, a batalha começa sozinha: iniciais em campo, iniciativa de todos, rodada 1.
+- **Simular (só treinadores do mestre):** a extensão joga os turnos: cada Pokémon escolhe o Move de dano
+  que mais machuca um inimigo (vantagem de tipo, chance de derrubar), anda até ele dentro da arena, ataca e
+  passa o turno; quem desmaia volta e a próxima reserva entra. No fim sai o resumo (vencedor, rodadas,
+  nocautes, quem mais causou dano e quem ficou de pé) no popup e no registro. Durante a simulação ninguém
+  reage pelos popups.
+- **Equipe Selvagens:** pra Pokémon que não são de treinador (como Neutros).
 - **Áreas na iniciativa:** o Pretty Sordid só lista tokens, então cada área com duração ganha um marcador
   (uma imagem pequena presa ao círculo) que entra na iniciativa no lugar dela, com as rodadas no nome.
 - **Dano de campo visível:** dano e cura do começo/fim do turno (areia, granizo, veneno, queimadura,

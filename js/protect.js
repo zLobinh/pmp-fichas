@@ -10,10 +10,10 @@
 //   3. no answer in time = no defense.
 // Defending costs the reaction, the action of the next turn and 1 PP. Used in a row (the round
 // before), the book's rule: 1d6 per consecutive success (max 6d6), all of them 5 or 6.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.12";
-import { fmtM } from "./rules.js?v=0.9.12";
-import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.12";
-import { distanceMeters } from "./map.js?v=0.9.12";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.13";
+import { fmtM } from "./rules.js?v=0.9.13";
+import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.13";
+import { distanceMeters } from "./map.js?v=0.9.13";
 
 // kind: what the protection covers
 //   single       any single-target move aimed at the user
@@ -145,6 +145,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function ask(asks, attackerItem, moveLabel) {
   const answers = new Map();
   if (!asks.length) return answers;
+  // a simulated battle (prep.js) doesn't stop for popups: nobody reacts
+  const prep = (await OBR.scene.getMetadata())["com.pmp-fichas/prep"];
+  if (prep?.status === "running" && prep.sim) return answers;
   const req = crypto.randomUUID();
   for (const a of asks) {
     await updateSheet(a.P.id, (s) => {

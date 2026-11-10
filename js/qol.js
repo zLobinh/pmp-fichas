@@ -1,9 +1,9 @@
 // Shortcuts for the table: start a combat with every selected Pokémon, send the selected ones back to
 // their trainers, a long rest for a whole team, and fainted Pokémon going back to the ball by themselves.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.12";
-import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.12";
-import { rollInitiative, distanceMeters } from "./map.js?v=0.9.12";
-import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.12";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.13";
+import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.13";
+import { rollInitiative, distanceMeters } from "./map.js?v=0.9.13";
+import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.13";
 
 const running = async () => (await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY]?.active === true)).length > 0;
 
@@ -84,6 +84,9 @@ export function watchFainted(rules) {
   const tick = async () => {
     const settings = await getSettings();
     if (settings.autoRecall === false) return;
+    // a simulated battle (prep.js) sends its reserves by itself
+    const prep = (await OBR.scene.getMetadata())["com.pmp-fichas/prep"];
+    if (prep?.status === "running" && prep.sim) return;
     const down = await OBR.scene.items.getItems((i) => {
       const s = i.metadata?.[SHEET_KEY];
       return s?.trainer && !s.ball && (s.pkmn?.hp?.current ?? 1) <= 0 && i.metadata?.[PRETTY]?.active !== true;

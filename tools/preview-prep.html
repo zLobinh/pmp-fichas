@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prévia: preparar batalha</title>
+    <script type="importmap">
+      { "imports": { "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm": "./mock-obr.js?v=10" } }
+    </script>
+    <link rel="stylesheet" href="../css/style.css" />
+    <style>body { width: 440px; border: 1px dashed #555; }</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Squirtle ("c") and a copy of it ("Rival") are trainers; Bulbasaur/Oddish with c, Charmander/Pidgey with the Rival -->
+    <script type="module">
+      await import("https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm");
+      const items = window.__mock.items;
+      const it = (id) => items.find((i) => i.id === id);
+      const c = it("c");
+      c.metadata["com.pmp-fichas/trainer"] = { owner: "me", team: "jogadores" };
+      const rival = JSON.parse(JSON.stringify(c)); rival.id = "r"; rival.name = "Rival";
+      rival.metadata["com.pmp-fichas/trainer"] = { owner: "me", team: "inimigos" };
+      items.push(rival);
+      for (const [id, tr, slot] of [["a", "c", 0], ["d", "c", 1], ["b", "r", 0], ["e", "r", 1]]) Object.assign(it(id).metadata["com.pmp-fichas/sheet"], { trainer: tr, slot });
+      const P = await import("../js/prep.js");
+      await P.newPrep([c, rival]);
+      await P.setPrep((p) => { p.configured = true; p.trainers.c.starters = ["a"]; return p; });
+      await import("../js/prep-ui.js");
+    </script>
+  </body>
+</html>
