@@ -2,11 +2,11 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.11";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.11";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode, refreshTokens } from "./trainer.js?v=0.9.11";
-import { distanceMeters } from "./map.js?v=0.9.11";
-import { longRest } from "./qol.js?v=0.9.11";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.12";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.12";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, dropIllusion, createFromCode, refreshTokens, joinInitiativeNow } from "./trainer.js?v=0.9.12";
+import { distanceMeters } from "./map.js?v=0.9.12";
+import { longRest } from "./qol.js?v=0.9.12";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");
@@ -86,12 +86,14 @@ function details(p) {
       onchange: (e) => act(async () => {
         const as = state.list.find((x) => x.id === e.target.value);
         await updateSheet(p.id, (x) => { if (as) x.illusion = { id: as.id, name: realName(as) }; else delete x.illusion; });
+        // "nenhuma" (or another one) while disguised: the current disguise comes off first
+        await dropIllusion(state.rules, await getItem(p.id));
         // already on the field without a disguise: put it on now
         const now = await getItem(p.id);
-        if (as && !inBall(getSheet(now)) && !getSheet(now).battle?.realLook) await applyIllusion(state.rules, now);
+        if (as && !inBall(getSheet(now)) && !getSheet(now).realLook) await applyIllusion(state.rules, now);
       }),
     }, [h("option", { value: "" }, "nenhuma"), ...state.list.filter((x) => x.id !== p.id).map((x) => h("option", { value: x.id, selected: s.illusion?.id === x.id }, realName(x)))]),
-    s.battle?.realLook ? h("span", { class: "chip" }, `disfarçado de ${s.illusion?.name ?? "?"}`) : null) : null;
+    s.realLook ? h("span", { class: "chip" }, `disfarçado de ${s.illusion?.name ?? "?"}`) : null) : null;
   return h("div", { class: "tc-detail" },
     h("div", { class: "row" },
       h("b", {}, realName(p)), h("span", { class: "tc-muted small" }, `Nv ${state.rules.level(s.pkmn)}`),
@@ -106,30 +108,8 @@ function details(p) {
     illusion);
 }
 // the real name and image (under an Illusion the token shows someone else)
-const realName = (p) => getSheet(p)?.battle?.realLook?.name ?? p.name;
-const realImage = (p) => getSheet(p)?.battle?.realLook?.image?.url ?? p.image?.url ?? "";
-
-// 8 badges along the bottom; the GM clicks to give or take one
-const BADGE_COLORS = ["#9aa3ad", "#4aa3df", "#f2c94c", "#6fcf97", "#bb6bd9", "#eb5757", "#f2994a", "#56ccf2"];
-function badges() {
-  const got = trainerOf(state.trainer).badges ?? [];
-  const toggle = (i) => act(async () => {
-    await OBR.scene.items.updateItems([trainerId], (ds) => {
-      for (const d0 of ds) {
-        const b = [...(d0.metadata[TRAINER].badges ?? [])];
-        b[i] = !b[i];
-        d0.metadata[TRAINER] = { ...d0.metadata[TRAINER], badges: b };
-      }
-    });
-  });
-  return h("div", { class: "tc-badges" },
-    h("span", { class: "tc-badges-title" }, "INSÍGNIAS"),
-    h("div", { class: "tc-badge-row" }, BADGE_COLORS.map((c, i) => h("span", {
-      class: `tc-badge ${got[i] ? "on" : ""}`, style: `--badge:${c}`,
-      title: `Insígnia ${i + 1}${got[i] ? "" : " (ainda não)"}${state.isGM ? " · clique pra marcar" : ""}`,
-      onclick: state.isGM ? () => toggle(i) : null,
-    }, h("i", {})))));
-}
+const realName = (p) => getSheet(p)?.realLook?.name ?? p.name;
+const realImage = (p) => getSheet(p)?.realLook?.image?.url ?? p.image?.url ?? "";
 
 async function doRest() {
   await act(async () => {
@@ -144,9 +124,11 @@ async function doRelease(p) {
     const combat = await running();
     await release(state.rules, p, state.trainer);
     if (combat) {
-      // entering mid-combat: no action this turn, joins the initiative at the next round
-      await updateSheet(p.id, (s) => { s.battle.econ = { action: false, bonus: true, reaction: true }; s.battle.needsInitiative = true; s.battle.joinNextRound = true; });
-      await pushLog({ kind: "note", attacker: state.trainer.name, text: `${p.name} entrou no combate (rola iniciativa no começo da próxima rodada)` });
+      // entering mid-combat: rolls initiative now and shows up in Pretty Sordid, but only acts from the
+      // next round (its turn this round is skipped by itself)
+      await updateSheet(p.id, (s) => { s.battle.econ = { action: false, bonus: true, reaction: true }; });
+      await joinInitiativeNow(state.rules, p);
+      await pushLog({ kind: "note", attacker: state.trainer.name, text: `${p.name} entrou no combate (já está na iniciativa; age a partir da próxima rodada)` });
     }
     await entryAbilities(state.rules, await getItem(p.id));
   });
@@ -253,7 +235,6 @@ function render() {
       h("div", { class: "tc-art" }, state.trainer.image?.url ? h("img", { src: state.trainer.image.url, alt: "" }) : null)),
     details(state.list.find((p) => p.id === state.sel)),
     state.list.length < MAX_PARTY ? addByCode() : null,
-    badges(),
     h("div", { class: "tc-actions" },
       state.list.length < MAX_PARTY ? h("button", { class: "small", disabled: state.busy, title: "Selecione no mapa os tokens dos Pokémon (com ficha) e clique aqui", onclick: absorbSelected }, "Guardar os selecionados") : null,
       state.list.length ? h("button", { class: "small primary", disabled: state.busy, title: "Fora do combate: HP e PP cheios, condições e estágios limpos (a equipe toda)", onclick: doRest }, "Descanso longo") : null,

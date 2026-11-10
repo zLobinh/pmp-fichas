@@ -4,25 +4,25 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.11";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.11";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.11";
-import { getRoller } from "./dice.js?v=0.9.11";
-import { defenses, endure } from "./protect.js?v=0.9.11";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.11";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.12";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.12";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.12";
+import { getRoller } from "./dice.js?v=0.9.12";
+import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.12";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.12";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
-  statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
+  statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError, moveTiming,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.11";
+} from "./battle.js?v=0.9.12";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.11";
+} from "./tactics.js?v=0.9.12";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.11";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.11";
-import * as MFX from "./movefx.js?v=0.9.11";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.12";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.12";
+import * as MFX from "./movefx.js?v=0.9.12";
 
 export { TurnError };
 
@@ -85,6 +85,14 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (why) throw new TurnError(why);
   }
   if (mfx.clearTerrain === "before" && !field.terrain && !opts.force) throw new Error(`${move.label} só funciona dentro de um terreno.`);
+  // reaction-only moves with a trigger (Sucker Punch, Counter, Protect...): only through their popup,
+  // when the trigger happens; never as a normal move from the sheet
+  if (!opts.defense && !opts.force && (DEFENSES[moveName] || AFTER_HIT[moveName])) {
+    const tm = moveTiming(raw);
+    if (tm.reaction && !tm.action && !tm.bonus) {
+      throw new TurnError(`${move.label} é só de reação: aparece sozinho (popup) quando ${AFTER_HIT[moveName] ? "este Pokémon for atingido" : "este Pokémon for alvo de um ataque"}.`);
+    }
+  }
   if (FIELD_MOVES[moveName]?.needs && !FIELD_MOVES[moveName].needs.includes(field.weather) && !opts.force) throw new Error(`${move.label} só pode ser usado com granizo ou neve.`);
   // this use's type (Hidden Power, Weather Ball, Terrain Pulse; Normalize, Pixilate, Liquid Voice...)
   let isLast = false;
@@ -206,6 +214,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (gate.paraLock) { s.battle.paraLock = true; s.battle.econ = { action: false, bonus: false, reaction: false }; }
       else if (gate.spendsAction) spend(s, cost);
       if (gate.selfDamage) takeDamage(s.pkmn, gate.selfDamage);
+      // hurting itself in confusion also takes the reaction
+      if (gate.loseReaction) s.battle.econ = { ...econOf(s), reaction: false };
     });
     entry.results.push({ target: null, note: gate.reason });
     entry.failed = true;
@@ -364,7 +374,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   else if (helpOneDie) entry.notes.push("Helping Hand: dano rolado 2x, fica o maior");
   const parts = [];
   const want = (p) => parts.push(p) - 1;
-  const dmgParts = (sp = baseSpec) => Array.from({ length: dmg.times }, () => [want({ amount: sp.amount, sides: dmg.dice, bonus: dmg.bonus }), sp.reroll ? want({ amount: sp.amount, sides: dmg.dice, bonus: 0 }) : null]);
+  const dmgParts = (sp = baseSpec) => Array.from({ length: dmg.times }, () => [want({ amount: sp.amount, sides: dmg.dice, bonus: dmg.bonus, tag: "dmg" }), sp.reroll ? want({ amount: sp.amount, sides: dmg.dice, bonus: 0, tag: "dmg" }) : null]);
 
   // targets the move can't touch
   for (const b of blocked) entry.results.push({ target: null, note: `${b.t.name}: ${b.reason}, não foi atingido`, effects: [] });
@@ -463,16 +473,16 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     for (const n of [...tm.notes, ...td.notes]) if (!entry.notes.includes(n)) entry.notes.push(`${t.name}: ${n}`);
     return {
       t, tSheet, target, saveMod, adv, saveAdv, inv, spec, strike, tm, sureNow, extraStrike,
-      dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: spec.amount, sides: dmg.dice, bonus: 0 })) : null,
+      dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: spec.amount, sides: dmg.dice, bonus: 0, tag: "dmg" })) : null,
       // Punishment: +1 die per positive stage of the target (max 7)
       boost: fx.dicePerTargetBoost && hasDice && target ? (() => {
         const k = Math.min(fx.dicePerTargetBoost, Object.values(Array.isArray(target.stages) ? {} : target.stages ?? {}).reduce((a, v) => a + Math.max(0, v), 0));
-        return k ? want({ amount: k, sides: dmg.dice, bonus: 0 }) : null;
+        return k ? want({ amount: k, sides: dmg.dice, bonus: 0, tag: "dmg" }) : null;
       })() : null,
       // team/owner travel with the result so each viewer can hide what they shouldn't see
       r: { targetId: t.id, target: `${t.name || (target ? rules.name(target) : "Alvo")}${nHits > 1 ? ` (${strike + 1}º golpe)` : ""}`, effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
-      atk: move.attackBonus != null && !extraStrike ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
-      sure: (move.sureHit && move.attackBonus == null) || extraStrike ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
+      atk: move.attackBonus != null && !extraStrike ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus, tag: strike > 0 ? "extra" : "hit" }) : null,
+      sure: (move.sureHit && move.attackBonus == null) || extraStrike ? want({ amount: 1, sides: 20, bonus: 0, tag: strike > 0 ? "extra" : "hit" }) : null,
       // the waiting die was already rolled; chips roll theirs in this throw
       help: helpSides && !pendingHelp?.die && move.attackBonus != null ? want({ amount: 1, sides: helpSides, bonus: 0 }) : null,
       helpFixed: move.attackBonus != null ? Math.max(pendingHelp?.die ?? 0, 0) : 0,
@@ -592,7 +602,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (fickle) p.r.effects.push("Fickle Beam: dados dobrados");
   }
   const crits = plans.filter((p) => p.extraSets > 0 && p.dmg && p.hitFactor > 0);
-  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.flatMap(() => Array.from({ length: p.extraSets }, () => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0 })))), `${moveName_} CRÍTICO`) : [];
+  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.flatMap(() => Array.from({ length: p.extraSets }, () => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0, tag: "dmg" })))), `${moveName_} CRÍTICO`) : [];
 
   // 4) damage: stages, burn, type, defense
   if (dmg) {
@@ -770,7 +780,13 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     // Sentinela: an attack of opportunity that hits stops the creature for the rest of the turn
     if (opts.opportunity && hit && p.hitFactor > 0 && rules.hasFeat(attacker, "Sentinela")) ch.stop = true;
     if (fx.cureBurn && hit) ch.cureBurn = true; // Sparkling Aria
-    if (failed) { if (fx.statusFail) ch.give.push(fx.statusFail); ch.stages.push(...fx.fail); }
+    if (failed) {
+      // Megahorn: the knock-down only after a 6 m run at the target this turn
+      const ran = !fx.needsRun || (aSheet.battle?.move?.used ?? 0) >= fx.needsRun - 0.05;
+      if (fx.statusFail && ran) ch.give.push(fx.statusFail);
+      else if (fx.statusFail) p.r.effects.push(`falhou no teste, mas ${who} não correu ${fx.needsRun} m antes (não derruba)`);
+      ch.stages.push(...fx.fail);
+    }
     if (hit && fx.direct.length && (dmg ? p.hitFactor > 0 : !move.save)) ch.stages.push(...fx.direct);
     if (p.r.contest?.success) { if (fx.contest.status) ch.give.push(fx.contest.status); ch.stages.push(...fx.contest.stages); }
     if (fx.statusDirect && hit && !move.save) ch.give.push(fx.statusDirect);
@@ -1026,6 +1042,13 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       const block = (key) => statusBlock(rules, s, key, { field: tFields.get(id) ?? field, grounded: tGround, team: teamOf(s), fromOther: !self, source: { infiltrator, secondary: !!move.damage }, gas });
       for (const key of [...new Set(ch.give)]) {
         if (s.pkmn.hp.current <= 0) break;
+        // "derrubado / caído": the prone state (stands up at the start of its turn, half the movement)
+        if (key === "Prone") {
+          if (Number(s.battle.alt) > 0) { r.effects.push("voando: não fica caído"); continue; }
+          s.battle.prone = true;
+          r.effects.push("🤕 caído (derrubado)");
+          continue;
+        }
         const res = giveCondition(s, key, rules, { ownTurn, block, corrosion: aAbil.includes("Corrosion") });
         r.effects.push(res.ok ? `ficou ${CONDITIONS[res.became ?? key].label}` : `${CONDITIONS[key].label}: ${res.reason}`);
         if (res.ok) {
@@ -1077,6 +1100,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     const tNow = (await OBR.scene.items.getItems([id]))[0];
     if (ch.breakScreens && after) { if (await clearSide(teamOf(after), ["reflect", "lightScreen", "auroraVeil"], tNow)) entry.notes.push("as telas do alvo quebraram"); }
     if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
+    // an Illusion stuck from an older version (no saved look): the hit shows its real self too
+    if (ch.damage > 0 && tNow && !self && !getSheet(tNow)?.realLook) {
+      const { dropIllusion } = await import("./trainer.js?v=0.9.12");
+      if (await dropIllusion(rules, tNow).catch(() => false)) r.effects.push("a ilusão se desfez!");
+    }
     // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
     if (ch.vortex && tNow && !self) {
       const n = await startField({ vortex: ch.vortex, rounds: 5, r: 0.75, at: "target" }, { user: (await OBR.scene.items.getItems([attackerItem.id]))[0], target: tNow, move: moveName_, by: who });
@@ -1151,7 +1179,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (running && !opts.defense && targetItems.length) {
     const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
     if (hitIds.size) {
-      const { afterHitReactions } = await import("./protect.js?v=0.9.11");
+      const { afterHitReactions } = await import("./protect.js?v=0.9.12");
       const hit = await OBR.scene.items.getItems([...hitIds]);
       await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
     }
@@ -1217,7 +1245,7 @@ export async function throwAttack(rules, attackerItem, target, opts = {}) {
     // bigger than the target: +1d6 per size category
     const bigger = thrown && cSheet && tp ? Math.max(0, rules.sizeRank(cSheet.pkmn) - rules.sizeRank(tp)) : 0;
     const adv = tSheet ? attackAdvantage(aSheet, tSheet, attackerItem.id) : 0;
-    const [atk, dm] = await roller.batch([{ amount: adv ? 2 : 1, sides: 20, bonus: str }, { amount: 1 + bigger, sides: 6, bonus: str }], `${who} arremessa${thrown ? ` ${thrown.name}` : ""}`);
+    const [atk, dm] = await roller.batch([{ amount: adv ? 2 : 1, sides: 20, bonus: str, tag: "hit" }, { amount: 1 + bigger, sides: 6, bonus: str, tag: "dmg" }], `${who} arremessa${thrown ? ` ${thrown.name}` : ""}`);
     const n = adv ? Math.max(...atk.dice) : atk.dice[0];
     const total = n + str;
     const ac = tp ? rules.ac(tp) + stage(tp, "Evasion") : null;

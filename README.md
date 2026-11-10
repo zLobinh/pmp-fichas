@@ -202,6 +202,37 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   combate, o painel do treinador abre pro dono escolher quem entra.
 - **Trainer Card:** o painel do treinador virou um cartão com os 6 Pokémon em molduras, a arte do token do
   treinador, 8 insígnias (o mestre clica pra marcar) e o botão *Descanso longo* (equipe toda, fora do combate).
+- **Áreas no mapa (field.js):** Rain Dance, Sunny Day, Sandstorm, Hail, Snowscape (15 m, seguem quem usou),
+  os terrenos (12 m, fixos), Reflect, Light Screen, Aurora Veil, Safeguard, Mist (fixos, da equipe de quem usou),
+  Tailwind (15 m, segue), Spikes, Toxic Spikes, Stealth Rock e Sticky Web (6 m, no alvo; dá pra arrastar) e os
+  redemoinhos de Whirlpool, Fire Spin, Sand Tomb, Infestation e Magma Storm (1,5 m, embaixo do alvo) viram
+  círculos no mapa. Os efeitos valem só pra quem está dentro. As áreas com duração entram no Pretty Sordid logo
+  depois de quem usou, com as rodadas que faltam no nome ("☀️ Sunny Day (4)"); no turno delas a contagem
+  desce e no fim elas somem. Entrar em Spikes/Stealth Rock/Toxic Spikes/Sticky Web (andando ou saindo da
+  pokébola ali) aplica o efeito; entrar ou sair de um redemoinho machuca (1x por turno) e terminar o turno
+  dentro também. Na troca, o clima/Tailwind que seguia quem saiu passa a seguir quem entrou.
+- **Áreas na iniciativa:** o Pretty Sordid só lista tokens, então cada área com duração ganha um marcador
+  (uma imagem pequena presa ao círculo) que entra na iniciativa no lugar dela, com as rodadas no nome.
+- **Dano de campo visível:** dano e cura do começo/fim do turno (areia, granizo, veneno, queimadura,
+  redemoinho, Leech Seed, Grassy Terrain) e dos perigos no chão aparecem flutuando no token, como o de ataque.
+- **Quem entra no meio do combate** (liberado, ou no lugar de um desmaiado) rola a iniciativa na hora e já
+  aparece no Pretty Sordid; o turno dele na rodada em que entrou é pulado sozinho, e ele age a partir da próxima.
+- **Moves só de reação** (Sucker Punch, Thunderclap, Counter, Mirror Coat, Metal Burst, Comeuppance, Spite,
+  Protect e a família) não podem ser usados como Move normal pela ficha: só pelo popup, quando o gatilho
+  acontece (o mestre ainda pode forçar).
+- **Dados coloridos no Dice+:** acerto, dano e golpes extras pedem dados com nomes da bolsa do Dice+ (padrão
+  "Acerto", "Dano" e "Extra", trocáveis no painel). Crie esses três na bolsa do Dice+ com as cores (azul claro,
+  vermelho, laranja); sem eles, o Dice+ usa os dados normais.
+- **Moves que prendem:** Wrap, Bind, Clamp, Snap Trap, Thunder Cage e Octolock deixam o alvo agarrado e
+  machucam no fim de cada turno dele (Octolock também tira Defesa e Defesa Especial).
+- **Reações com gatilho (popup como o Protect):** antes do golpe, Sucker Punch e Thunderclap atacam primeiro
+  (o Sucker Punch corre até o atacante se estiver no deslocamento), Baby-Doll Eyes e Tearful Look baixam o
+  Ataque, Withdraw sobe a Defesa e Magic Coat devolve Moves de status; se o atacante desmaiar, o golpe não sai.
+  Depois do golpe, Counter, Mirror Coat, Metal Burst e Comeuppance devolvem o dano e Spite tira 1d4 PP.
+- **Descrição do move:** parando o mouse em cima de um move na ficha rápida aparece o texto inteiro.
+- **Atualizar tokens que já existem:** botão direito → "Atualizar sprite e tamanho (PMP)" (ou "Atualizar
+  sprites" no cartão do treinador, pra equipe toda) troca a imagem pela certa e ajusta o tamanho sem recriar
+  nada; "Reimportar ficha (mantém o resto)" cola um código novo mantendo dono, equipe, treinador e batalha.
 - **Reações à troca:** quando um Pokémon é trocado, a troca espera os inimigos que podem reagir (o mesmo
   popup de 5 s do Protect): **Pursuit** ataca quem está saindo, **Bolt Beak** e **Fishious Rend** quem acabou
   de entrar. O atacante corre até o alvo sem provocar ataque de oportunidade, rola com o dobro dos dados, gasta

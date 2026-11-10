@@ -9,10 +9,11 @@
 //   - an area with a duration joins Pretty Sordid right after its user, "Sunny Day (5)": on its turn
 //     the count goes down (areaTurn) and at 0 it disappears. Out of combat it runs out by the round.
 // Trick Room has no area: it stays in the scene metadata (FIELD_KEY).
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.11";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.12";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
 export const AREA_KEY = `${ID}/area`;
+export const MARKER_KEY = `${ID}/areaMarker`;
 const ROUND_KEY = "com.pretty-initiative/roundCount";
 const PRETTY = "com.pretty-initiative/metadata";
 
@@ -227,10 +228,21 @@ export async function startField(spec, ctx = {}) {
   let b = SDK.buildShape().shapeType("CIRCLE").width(diameter).height(diameter).position({ ...center.position })
     .fillColor(color).fillOpacity(kind === "vortex" ? 0.35 : 0.14).strokeColor(color).strokeOpacity(0.9).strokeWidth(Math.max(2, g.dpi * 0.03))
     .layer("DRAWING").name(areaName(meta)).locked(kind !== "hazard").disableHit(kind !== "hazard")
-    .metadata({ [AREA_KEY]: meta, ...(inInit ? { [PRETTY]: { count: String(Math.round((parseFloat(uInit.count) - 0.01) * 100) / 100), active: false } } : {}) });
+    .metadata({ [AREA_KEY]: meta });
   if (spec.follow && user) b = b.attachedTo(user.id).disableAttachmentBehavior(["VISIBLE", "SCALE", "ROTATION", "LOCKED", "COPY"]);
   const item = b.build();
-  await OBR.scene.items.addItems([item]);
+  const add = [item];
+  // Pretty Sordid lists tokens (images), not shapes: a small marker on the circle stands in the
+  // initiative for it, right after its user, with the rounds left in its name
+  if (inInit) {
+    const size = 64;
+    add.push(SDK.buildImage({ url: asset("icons/area.svg"), width: size, height: size, mime: "image/svg+xml" }, { dpi: size * 2, offset: { x: size / 2, y: size / 2 } })
+      .name(areaName(meta)).position({ ...center.position }).layer("CHARACTER").locked(true).disableHit(true)
+      .attachedTo(item.id).disableAttachmentBehavior(["SCALE", "ROTATION", "LOCKED", "COPY"])
+      .metadata({ [MARKER_KEY]: { areaId: item.id }, [PRETTY]: { count: String(Math.round((parseFloat(uInit.count) - 0.01) * 100) / 100), active: false } })
+      .build());
+  }
+  await OBR.scene.items.addItems(add);
   if (inInit) await reorderInitiative();
   const what = labelOf(meta);
   return `${iconOf(meta)} ${what}${rounds != null ? ` por ${rounds} rodadas` : ""}${kind === "side" ? ` (aliados a até ${String(r).replace(".", ",")} m)` : ""}`;
@@ -246,6 +258,9 @@ async function reorderInitiative() {
 }
 export async function removeAreas(ids) {
   if (!ids.length) return;
+  // their initiative markers go with them
+  const markers = await OBR.scene.items.getItems((i) => ids.includes(i.metadata?.[MARKER_KEY]?.areaId));
+  ids = [...ids, ...markers.map((m) => m.id)];
   const meta = await OBR.scene.getMetadata();
   const order = Object.values(meta["com.pretty-initiative/order"] ?? {}).filter((id) => !ids.includes(id));
   await OBR.scene.items.deleteItems(ids);
@@ -253,14 +268,21 @@ export async function removeAreas(ids) {
 }
 
 // its turn in the initiative: one round less; at 0 it ends. Returns a note.
+// (called with the marker that is in the initiative, or the area itself)
 export async function areaTurn(item) {
+  if (item?.metadata?.[MARKER_KEY]) [item] = await OBR.scene.items.getItems([item.metadata[MARKER_KEY].areaId]);
   const m = areaOf(item);
   if (!m) return null;
   const left = (m.left ?? 1) - 1;
   if (left <= 0) { await removeAreas([item.id]); return `${labelOf(m)} acabou`; }
-  await OBR.scene.items.updateItems([item.id], (ds) => { for (const d0 of ds) { d0.metadata[AREA_KEY] = { ...d0.metadata[AREA_KEY], left }; d0.name = areaName({ ...m, left }); } });
+  const markers = await OBR.scene.items.getItems((i) => i.metadata?.[MARKER_KEY]?.areaId === item.id);
+  await OBR.scene.items.updateItems([item.id, ...markers.map((x) => x.id)], (ds) => {
+    for (const d0 of ds) { if (d0.metadata[AREA_KEY]) d0.metadata[AREA_KEY] = { ...d0.metadata[AREA_KEY], left }; d0.name = areaName({ ...m, left }); }
+  });
   return `${labelOf(m)}: falta(m) ${left} rodada(s)`;
 }
+// the initiative marker of an area
+export const isAreaTurn = (item) => !!(item?.metadata?.[AREA_KEY] || item?.metadata?.[MARKER_KEY]);
 
 export async function clearTerrain(item = null) {
   const areas = (await getAreas()).filter((a) => areaOf(a).kind === "terrain");
@@ -282,9 +304,10 @@ export async function expireField() {
   const round = await roundNow();
   const gone = [];
   const ids = [];
+  const counted = new Set((await OBR.scene.items.getItems((i) => i.metadata?.[MARKER_KEY] && i.metadata?.[PRETTY])).map((i) => i.metadata[MARKER_KEY].areaId));
   for (const a of await getAreas()) {
     const m = areaOf(a);
-    if (m.inInit && a.metadata?.[PRETTY]) continue; // counted on its own turn
+    if (counted.has(a.id)) continue; // counted on its own turn in the initiative
     if (m.until != null && round >= m.until) { ids.push(a.id); gone.push(`${labelOf(m)} acabou`); }
   }
   await removeAreas(ids);
@@ -363,6 +386,9 @@ export async function hazardsOnMove(rules, item, from, to, { giveCondition, addS
     }
   });
   if (notes.length) await pushLog({ kind: "note", attacker: item.name, text: notes.join("; ") });
+  // the HP lost shows up on the token, like an attack's damage
+  const lost = ops.reduce((a, o) => a + (o.dmg ?? 0), 0);
+  if (lost > 0) await OBR.broadcast.sendMessage("com.pmp-fichas/fx", { from: to, hits: [{ to, kind: "hit", text: `-${lost}` }] }, { destination: "ALL" }).catch(() => {});
   return notes;
 }
 // end of its own turn inside a vortex: half its level, untyped

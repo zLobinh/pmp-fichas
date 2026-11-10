@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.11";
-import { describe } from "./combat.js?v=0.9.11";
-import { openSheet, openHud, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.11";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.11";
-import { dicePlusReady } from "./dice.js?v=0.9.11";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.11";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.12";
+import { describe } from "./combat.js?v=0.9.12";
+import { openSheet, openHud, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.12";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.12";
+import { dicePlusReady } from "./dice.js?v=0.9.12";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.12";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -71,6 +71,12 @@ function render() {
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.checkRange, onchange: (e) => setSettings({ checkRange: e.target.checked }) }), "Exigir que o alvo esteja no alcance do Move"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.moveControl, onchange: (e) => setSettings({ moveControl: e.target.checked }) }), "Controlar o deslocamento em combate (token volta se andar demais ou fora do turno)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.autoRecall, onchange: (e) => setSettings({ autoRecall: e.target.checked }) }), "Pokémon desmaiado volta sozinho pra pokébola (treinador a até 18 m)"),
+          h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.coloredDice, onchange: (e) => setSettings({ coloredDice: e.target.checked }) }),
+            "Dados coloridos no Dice+: acerto, dano e golpes extras usam dados com estes nomes da bolsa do Dice+"),
+          h("div", { class: "row small", style: "gap:6px;margin-left:20px" },
+            ...[["diceHit", "Acerto", "azul claro"], ["diceDmg", "Dano", "vermelho"], ["diceExtra", "Extra", "laranja"]].map(([k, def, color]) =>
+              h("label", { class: "row", title: `Crie na bolsa do Dice+ um conjunto de dados com este nome (${color})` }, `${def}: `,
+                h("input", { value: state.settings[k] ?? def, style: "width:70px", onchange: (e) => setSettings({ [k]: e.target.value.trim() || def }) })))),
           watchLine(),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.mapFx, onchange: (e) => setSettings({ mapFx: e.target.checked }) }), "Animação no mapa (quem acertou quem)"),
           h("label", { class: "row small" }, h("input", { type: "checkbox", checked: state.settings.dicePlus, onchange: (e) => setSettings({ dicePlus: e.target.checked }) }),

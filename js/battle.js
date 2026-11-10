@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.11";
-import { d } from "./rules.js?v=0.9.11";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.11";
-import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn } from "./field.js?v=0.9.11";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.11";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.12";
+import { d } from "./rules.js?v=0.9.12";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.12";
+import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.12";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.12";
 
 // ------------------------------------------------------------------ conditions
 
@@ -133,6 +133,8 @@ const STATUS_WORDS = [
   [/gravemente envenenad/i, "BadlyPoisoned"], [/envenenad/i, "Poisoned"], [/queimad/i, "Burning"], [/paralisad/i, "Paralyzed"],
   [/congelad/i, "Frozen"], [/sonolent/i, "Drowsy"], [/\b(dorme|dormindo|adormec)/i, "Asleep"], [/confus/i, "Confused"],
   [/encantad/i, "Infatuated"], [/atordoad/i, "Stunned"],
+  // "fica caído", "ser derrubada": not a condition, the prone state (battle.prone, combat.js)
+  [/derrubad|\bca[ií]d[oa]\b/i, "Prone"],
 ];
 const ATTR = { FOR: "STR", DES: "DEX", CON: "CON", INT: "INT", SAB: "WIS", CAR: "CHA" };
 
@@ -175,7 +177,7 @@ function stagesIn(sentence) {
 function statusIn(sentence) {
   // "fica Queimado", "é envenenada", "ficando paralisado", "recebe o status Atordoado",
   // "deixando o alvo queimado" (no \b: it fails next to accents)
-  if (!/(^|\s)(fica|ficar|ficará|ficando|fique|fiquem|ficam|torna|é|será|cai no sono|dorme|adormec|recebe|deixa\w*)/i.test(sentence)) return null;
+  if (!/(^|\s)(fica|ficar|ficará|ficando|fique|fiquem|ficam|torna|é|ser|será|cai no sono|dorme|adormec|recebe|deixa\w*)/i.test(sentence)) return null;
   for (const [re, key] of STATUS_WORDS) if (re.test(sentence)) return key;
   return null;
 }
@@ -245,7 +247,10 @@ export function moveEffects(move) {
     }
     const stages = stagesIn(s);
     const status = statusIn(s);
-    const onFail = /falha|falhar|fracasso/i.test(s) && move.Save;
+    // "...teste de FOR contra sua CD de Move ou ser derrubada" (Megahorn): "ou ser/ficar" is the failure
+    const onFail = /falha|falhar|fracasso|\bou (ser|ficar|fica)\b/i.test(s) && move.Save;
+    // Megahorn: only after running 6 m in a straight line at it
+    if (onFail && /mover 6 metros|6 metros ou mais em linha reta/i.test(s)) fx.needsRun = 6;
     for (const st of stages) {
       if (onFail) fx.fail.push(st);
       else if ((pessoal && !area) || selfish) fx.self.push(st);
@@ -374,7 +379,7 @@ export async function statusGate(rules, item, roller, { thawSelf = false } = {})
         const lvl = rules.level(sheet.pkmn);
         const str = Math.floor((rules.attributes(sheet.pkmn).STR - 10) / 2);
         const dmg = Math.max(2, Math.floor(lvl / 2)) + str;
-        return { canAct: false, checks, reason: `Confuso (${nat} no d6): se atrapalhou e tomou ${dmg} de dano. O Move falha, sem gastar PP, mas a ação é gasta.`, selfDamage: Math.max(0, dmg), spendsAction: true };
+        return { canAct: false, checks, reason: `Confuso (${nat} no d6): se atrapalhou e tomou ${dmg} de dano. O Move falha, sem gastar PP, mas a ação e a reação são gastas.`, selfDamage: Math.max(0, dmg), spendsAction: true, loseReaction: true };
       }
     }
     if (key === "Infatuated") {
@@ -515,7 +520,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.11");
+    const { distanceMeters } = await import("./map.js?v=0.9.12");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
@@ -618,6 +623,17 @@ export async function endCombat(items) {
 // and right after "Passar turno" by whoever pressed it (so it doesn't depend on the GM's browser).
 // Whoever writes the scene's turn key last does the work; the others back off.
 // onNewRound(): runs when the round changes (Pokémon that came in by a switch roll initiative)
+// HP lost or healed at the start/end of a turn (sandstorm, poison, vortex, Leech Seed, Grassy Terrain...):
+// the same floating number on the token as an attack's damage, for everyone
+export async function floatHp(itemId, before) {
+  const [it] = await OBR.scene.items.getItems([itemId]);
+  const now = getSheet(it)?.pkmn?.hp?.current;
+  if (now == null || now === before) return;
+  const { FX_CHANNEL } = await import("./map.js?v=0.9.12");
+  const text = now < before ? `-${before - now}` : `+${now - before}`;
+  await OBR.broadcast.sendMessage(FX_CHANNEL, { from: it.position, hits: [{ to: it.position, kind: now < before ? "hit" : "heal", text }] }, { destination: "ALL" }).catch(() => {});
+}
+
 export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
   const items = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null);
   const active = items.find(isActive);
@@ -635,7 +651,9 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
       const byId = new Map(sheets.map((s) => [s.id, s]));
       const log = [];
       if (prev.activeId && prev.activeId !== active.id && byId.has(prev.activeId)) {
+        const hp0 = getSheet(byId.get(prev.activeId)).pkmn.hp.current;
         const notes = await endTurn(rules, byId.get(prev.activeId));
+        await floatHp(prev.activeId, hp0);
         if (notes.length) log.push(`Fim do turno de ${byId.get(prev.activeId).name}: ${notes.join("; ")}`);
       }
       if (prev.round != null && round !== prev.round) {
@@ -649,12 +667,22 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
         }
       }
       if (byId.has(active.id)) {
+        const hp0 = getSheet(byId.get(active.id)).pkmn.hp.current;
         const notes = await startTurn(rules, (await OBR.scene.items.getItems([active.id]))[0]);
+        await floatHp(active.id, hp0);
         log.push(`Turno de ${active.name}${notes.length ? `: ${notes.join("; ")}` : ""}`);
       }
       // an area's turn (Sunny Day, Whirlpool...): one round less, then straight to the next one
+      // came in this round (released / in place of a fainted one): it only acts from the next round
+      const joinR = getSheet(byId.get(active.id))?.battle?.joinRound;
+      if (joinR != null && round < joinR) {
+        log.push(`${active.name} entrou nesta rodada: age a partir da próxima`);
+        for (const text of log) await pushLog({ kind: "note", attacker: "Combate", text });
+        await passTurn(active.id).catch(() => {});
+        return true;
+      }
       // (the turn passes first: an area that ends is then taken out of the order)
-      if (areaOf(active)) {
+      if (isAreaTurn(active)) {
         await passTurn(active.id).catch(() => {});
         const note = await areaTurn(active).catch(() => null);
         if (note) log.push(note);
@@ -721,7 +749,8 @@ export function watchTurns(rules, { onTurnStart, onNewRound } = {}) {
 
 // ------------------------------------------------------------------ teams and who sees what
 
-export const TEAMS = { jogadores: "Jogadores", inimigos: "Inimigos", neutros: "Neutros" };
+// "Selvagens": like the neutral ones, for wild Pokémon (not linked to a trainer)
+export const TEAMS = { jogadores: "Jogadores", inimigos: "Inimigos", neutros: "Neutros", selvagens: "Selvagens" };
 export const teamOf = (sheet) => sheet?.team ?? "inimigos";
 export const allies = (a, b) => teamOf(a) === teamOf(b);
 

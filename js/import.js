@@ -1,5 +1,5 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.11";
-import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.11";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.12";
+import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.12";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);
@@ -45,8 +45,8 @@ $("ok").onclick = async () => {
           old.imported = Date.now();
         } else d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
         // (under an Illusion the name/size are the disguise's: leave them)
-        if ($("rename").checked && !old?.battle?.realLook) d.name = name;
-        if ($("resize").checked && !old?.battle?.realLook) fitDraft(d, tokenCells(rules, pkmn, cellM), d.metadata[SHEET_KEY]);
+        if ($("rename").checked && !old?.realLook) d.name = name;
+        if ($("resize").checked && !old?.realLook) fitDraft(d, tokenCells(rules, pkmn, cellM), d.metadata[SHEET_KEY]);
       }
     });
     OBR.notification.show(`Ficha de ${name} (nível ${rules.level(pkmn)}) ${again ? "atualizada (equipe, dono e batalha mantidos)" : "importada"}!`, "SUCCESS");

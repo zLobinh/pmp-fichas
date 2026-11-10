@@ -228,6 +228,7 @@ body:has(.tcard) { background: transparent; }
 .tc-team { padding: 1px 8px; border-radius: 999px; border: 1px solid #666; }
 .tc-team.jogadores { border-color: #4aa3df; color: #8fcaf2; }
 .tc-team.inimigos { border-color: #e3504f; color: #f29b9a; }
+.tc-team.selvagens { border-color: #84cc16; color: #bef264; }
 .tc-owner { padding: 0 12px; gap: 6px; color: var(--tc-muted); }
 .tc-owner select { font-size: 11px; }
 .tc-switch { margin: 0 12px; padding: 7px 9px; border: 1px solid #ffd84a; border-radius: 8px; background: rgba(255,216,74,.08); display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }

@@ -9,12 +9,12 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.11";
-import { d, fmtM } from "./rules.js?v=0.9.11";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies, giveCondition, addStage } from "./battle.js?v=0.9.11";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.11";
-import { movementMods, abilitiesOf } from "./abilities.js?v=0.9.11";
-import { fieldCached, hazardsOnMove } from "./field.js?v=0.9.11";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.12";
+import { d, fmtM } from "./rules.js?v=0.9.12";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies, giveCondition, addStage } from "./battle.js?v=0.9.12";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.12";
+import { movementMods, abilitiesOf } from "./abilities.js?v=0.9.12";
+import { fieldCached, hazardsOnMove } from "./field.js?v=0.9.12";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);

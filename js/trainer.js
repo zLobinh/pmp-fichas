@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.11";
-import { d, fmtM } from "./rules.js?v=0.9.11";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.11";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.11";
-import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.11";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.11";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.12";
+import { d, fmtM } from "./rules.js?v=0.9.12";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.12";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.12";
+import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.12";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.12";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -134,7 +134,7 @@ export async function spriteFor(rules, pkmn) {
 // (position, sheet, battle, pokéball, left/right flip). One under an Illusion keeps its disguise and
 // gets the new look saved for when it breaks. Returns how many changed.
 export async function refreshTokens(rules, items, { sprite = true } = {}) {
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.11");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.12");
   const cellM = await cellMeters();
   const plan = [];
   for (const it of items) {
@@ -149,12 +149,12 @@ export async function refreshTokens(rules, items, { sprite = true } = {}) {
       const p = plan.find((x) => x.id === d0.id);
       const s = d0.metadata[SHEET_KEY];
       const image = p.sp ? { url: `${SPRITES}${encodeURIComponent(p.sp.f)}`, width: p.sp.w, height: p.sp.h, mime: p.sp.f.endsWith(".gif") ? "image/gif" : "image/png" } : null;
-      const w = image?.width ?? (s.battle?.realLook?.image ?? d0.image)?.width;
-      const h = image?.height ?? (s.battle?.realLook?.image ?? d0.image)?.height;
+      const w = image?.width ?? (s.realLook?.image ?? d0.image)?.width;
+      const h = image?.height ?? (s.realLook?.image ?? d0.image)?.height;
       const grid = { dpi: w / p.cells, offset: { x: w / 2, y: h / 2 } };
-      if (s.battle?.realLook) { // disguised: the real look waits for the Illusion to break
-        if (image) s.battle.realLook.image = image;
-        s.battle.realLook.grid = grid;
+      if (s.realLook) { // disguised: the real look waits for the Illusion to break
+        if (image) s.realLook.image = image;
+        s.realLook.grid = grid;
         continue;
       }
       if (image) d0.image = image;
@@ -174,7 +174,7 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.11");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.12");
   const cells = tokenCells(rules, pkmn, await cellMeters());
   const dpi = await OBR.scene.grid.getDpi();
   // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
@@ -262,23 +262,26 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
     dr.position = { ...trainerItem.position };
     dr.scale = { x: (dr.scale?.x ?? 1) * BALL_SCALE, y: (dr.scale?.y ?? 1) * BALL_SCALE };
   });
+  // an Illusion stuck from before (no saved look): back to its own sprite and name in the ball
+  const stuck = (await OBR.scene.items.getItems([pokemon.id]))[0];
+  if (stuck && !getSheet(stuck).realLook) await dropIllusion(rules, stuck).catch(() => {});
   if (!quiet) await pushLog({ kind: "note", attacker: trainerItem.name, text: `recolheu ${pokemon.name}${notes.length ? ` (${notes.join("; ")})` : ""}` });
 }
 
 // ------------------------------------------------------------------ Illusion (Zoroark)
 // The trainer picks who it pretends to be (sheet.illusion = { id, name }). Coming out of the ball it
-// takes that Pokémon's look (image, size, name); the real one is kept in battle.realLook. A hit that
+// takes that Pokémon's look (image, size, name); the real one is kept in sheet.realLook (outside the battle state, which combat start/end and rests wipe). A hit that
 // damages it (combat.js) or going back to the ball undoes it.
 export const hasIllusion = (rules, sheet) => !!sheet && (sheet.battle?.ability ? sheet.battle.ability === "Illusion" : rules.abilities(sheet.pkmn).includes("Illusion"));
 export async function applyIllusion(rules, item) {
   const s = getSheet(item);
-  if (!hasIllusion(rules, s) || !s.illusion?.id || inBall(s) || s.battle?.realLook) return false;
+  if (!hasIllusion(rules, s) || !s.illusion?.id || inBall(s) || s.realLook) return false;
   const [as] = await OBR.scene.items.getItems([s.illusion.id]);
   if (!as?.image) return false;
   const types = getSheet(as) ? rules.types(getSheet(as).pkmn) : null;
   await updateSheet(item.id, (sh, dr) => {
-    sh.battle.realLook = { image: { ...dr.image }, grid: JSON.parse(JSON.stringify(dr.grid ?? {})), name: dr.name, types: null };
-    sh.battle.fakeTypes = types;
+    sh.realLook = { image: { ...dr.image }, grid: JSON.parse(JSON.stringify(dr.grid ?? {})), name: dr.name, types: null };
+    sh.fakeTypes = types;
     const sign = Math.sign(dr.scale?.x ?? 1) || 1;
     dr.image = { ...as.image };
     if (as.grid) dr.grid = JSON.parse(JSON.stringify(as.grid));
@@ -290,14 +293,28 @@ export async function applyIllusion(rules, item) {
 }
 // undoes it (in an updateSheet draft); returns true when there was one
 export function dropIllusionDraft(s, dr) {
-  const real = s.battle?.realLook;
+  const real = s.realLook;
   if (!real) return false;
   dr.image = { ...real.image };
   if (real.grid && Object.keys(real.grid).length) dr.grid = real.grid;
   dr.name = real.name;
-  delete s.battle.realLook;
-  delete s.battle.fakeTypes;
+  delete s.realLook;
+  delete s.fakeTypes;
   return true;
+}
+
+// undoes it on the token (or, for one stuck in a disguise without the saved look — an older version kept
+// it in the battle state, which got wiped —, gives it back its own sprite and name)
+export async function dropIllusion(rules, item) {
+  const s = getSheet(item);
+  if (!s) return false;
+  if (s.realLook) { await updateSheet(item.id, (sh, dr) => dropIllusionDraft(sh, dr)); return true; }
+  if (hasIllusion(rules, s) && item.name !== rules.name(s.pkmn)) {
+    await refreshTokens(rules, [item]).catch(() => {});
+    await OBR.scene.items.updateItems([item.id], (ds) => { for (const d0 of ds) d0.name = rules.name(s.pkmn); });
+    return true;
+  }
+  return false;
 }
 
 // a free square around a point (rings of 1, 2, 3 squares)
@@ -407,7 +424,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.11");
+    const { switchReactions } = await import("./protect.js?v=0.9.12");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -426,14 +443,17 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
     // the fainted one was already out of the initiative (or leaves now); the new one joins next round
     await leaveInitiativeQuiet(outItem);
   }
+  const replacesFainted = combat && (fainted || !pretty);
   await updateSheet(inItem.id, (s) => {
     // "o Pokémon que entra só tem ação bônus e reação"
     s.battle.econ = { action: false, bonus: true, reaction: true };
-    if (combat) s.battle.needsInitiative = true;
-    if (combat && (fainted || !pretty)) s.battle.joinNextRound = true;
+    // a voluntary switch keeps the slot and rolls again at the next round
+    if (combat && !replacesFainted) s.battle.needsInitiative = true;
     if (stages) s.pkmn.stages = stages;
     s.battle.enteredRound = null;
   });
+  // in place of a fainted one: into the initiative right now, acting from the next round
+  if (replacesFainted) await joinInitiativeNow(rules, inItem);
   // the action of the one that left (voluntary switch)
   if (tracked && !fainted && !opts.forced && !opts.free) await updateSheet(outItem.id, (s) => { s.battle.econ = { ...econOf(s), action: false }; });
   const why = opts.forced ? ` (forçado por ${opts.by})` : opts.free ? ` (${opts.by}, ação livre)` : fainted ? " (desmaiado: ação livre)" : tracked ? " (gastou a ação)" : "";
@@ -443,7 +463,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.11");
+    const { switchReactions } = await import("./protect.js?v=0.9.12");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }
@@ -641,6 +661,17 @@ export async function trap(rules, moveName, byItem, items) {
 
 // start of a round: whoever came in by a switch rolls initiative (and the ones that came in for a
 // fainted Pokémon join the initiative now)
+// a Pokémon that comes into a running fight (released, or in place of a fainted one): rolls initiative
+// now and shows up in Pretty Sordid at once; its turns this round are skipped (battle.joinRound,
+// battle.processTurn), it acts from the next round on
+export async function joinInitiativeNow(rules, item) {
+  const round = await roundNow();
+  const [fresh] = await OBR.scene.items.getItems([item.id]);
+  if (!fresh) return;
+  await rollInitiative(rules, fresh);
+  await updateSheet(item.id, (s) => { s.battle.joinRound = round + 1; delete s.battle.needsInitiative; delete s.battle.joinNextRound; });
+}
+
 export async function rollPending(rules) {
   const list = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY]?.battle?.needsInitiative && !i.metadata[SHEET_KEY].ball);
   for (const it of list) {

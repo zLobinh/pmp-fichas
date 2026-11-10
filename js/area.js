@@ -6,7 +6,7 @@
 // Background -> sheet: the aim state in this player's metadata (AIM_KEY), which every page of the
 // extension sees through OBR.player.onChange. (Broadcasts from the background back to a popover
 // didn't arrive reliably.)
-import { OBR, SDK, ID, asset } from "./store.js?v=0.9.11";
+import { OBR, SDK, ID, asset } from "./store.js?v=0.9.12";
 
 export const AIM_START = `${ID}/aim-start`;
 export const AIM_ABORT = `${ID}/aim-abort`;
