@@ -1,9 +1,9 @@
 // Shortcuts for the table: start a combat with every selected Pokémon, send the selected ones back to
 // their trainers, a long rest for a whole team, and fainted Pokémon going back to the ball by themselves.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.8";
-import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.8";
-import { rollInitiative, distanceMeters } from "./map.js?v=0.9.8";
-import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.8";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.9";
+import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.9";
+import { rollInitiative, distanceMeters } from "./map.js?v=0.9.9";
+import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.9";
 
 const running = async () => (await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY]?.active === true)).length > 0;
 

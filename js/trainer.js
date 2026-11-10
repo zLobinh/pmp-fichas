@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.8";
-import { d, fmtM } from "./rules.js?v=0.9.8";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.8";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.8";
-import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.8";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.8";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.9";
+import { d, fmtM } from "./rules.js?v=0.9.9";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.9";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.9";
+import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.9";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.9";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -89,11 +89,16 @@ async function sprites() {
 // otherwise the plain one
 export async function spriteFor(rules, pkmn) {
   const list = await sprites();
-  const num = Number(pkmn.number ?? rules.speciesData(pkmn)?.index);
+  // by the species name first, then the PMP Pokédex number of the species; the "number" in the
+  // app's export is not always the national one (a Lycanroc came with Whismur's 293)
   const name = (pkmn.species?.current ?? "").toLowerCase();
-  let pool = list.filter((e) => e.d === num);
-  if (!pool.length) pool = list.filter((e) => e.n.toLowerCase() === name || name.startsWith(e.n.toLowerCase()));
+  const dex = Number(rules.speciesData(pkmn)?.index);
+  let pool = list.filter((e) => e.n.toLowerCase() === name);
+  if (!pool.length) pool = list.filter((e) => e.d === dex);
+  if (!pool.length) pool = list.filter((e) => name.startsWith(e.n.toLowerCase())).sort((a, b) => b.n.length - a.n.length);
+  if (!pool.length) pool = list.filter((e) => e.d === Number(pkmn.number));
   if (!pool.length) return null;
+  pool = pool.filter((e) => e.n === pool[0].n);
   const female = /^f/i.test(pkmn.gender ?? "") || /female|f[eê]mea/i.test(pkmn.gender ?? "");
   const word = name.replace(pool[0].n.toLowerCase(), "").trim(); // "vulpix alola" -> "alola"
   return (word ? pool.find((e) => e.v.toLowerCase().includes(word)) : null)
@@ -107,21 +112,32 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells } = await import("./map.js?v=0.9.8");
+  const { tokenCells } = await import("./map.js?v=0.9.9");
   const cells = tokenCells(rules, pkmn);
   const dpi = await OBR.scene.grid.getDpi();
-  const item = SDK.buildImage(
+  // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
+  // it appear), linked to the trainer in the same go; "Liberar" brings it out at its real size
+  const { buildImage } = SDK;
+  const existing = await party(trainerItem.id);
+  const used = new Set(existing.map((p) => getSheet(p).slot));
+  let slot = 0;
+  while (used.has(slot)) slot++;
+  const item = buildImage(
     { url: `${SPRITES}${encodeURIComponent(sp.f)}`, width: sp.w, height: sp.h, mime: sp.f.endsWith(".gif") ? "image/gif" : "image/png" },
     { dpi: sp.w / cells, offset: { x: sp.w / 2, y: sp.h / 2 } },
   )
     .name(rules.name(pkmn))
-    .position({ x: trainerItem.position.x + dpi, y: trainerItem.position.y })
+    .position({ ...trainerItem.position })
+    .scale({ x: BALL_SCALE, y: BALL_SCALE })
     .layer("CHARACTER")
-    .metadata({ [SHEET_KEY]: { pkmn, owner: t.owner, team: t.team, imported: Date.now() } })
+    .visible(false)
+    .locked(true)
+    .disableHit(true)
+    .metadata({ [SHEET_KEY]: { pkmn, owner: t.owner, team: t.team, imported: Date.now(), trainer: trainerItem.id, slot, ball: { scale: { x: 1, y: 1 }, layer: "CHARACTER" }, battle: {} } })
     .build();
   await OBR.scene.items.addItems([item]);
   const [made] = await OBR.scene.items.getItems([item.id]);
-  await link(rules, trainerItem, [made]);
+  await pushLog({ kind: "note", attacker: trainerItem.name, text: `guardou ${made.name} na pokébola` });
   return made;
 }
 
@@ -327,7 +343,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.8");
+    const { switchReactions } = await import("./protect.js?v=0.9.9");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -361,7 +377,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.8");
+    const { switchReactions } = await import("./protect.js?v=0.9.9");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }
