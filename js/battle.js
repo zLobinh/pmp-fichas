@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.13";
-import { d } from "./rules.js?v=0.9.13";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.13";
-import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.13";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.13";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.14";
+import { d } from "./rules.js?v=0.9.14";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.14";
+import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.14";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.14";
 
 // ------------------------------------------------------------------ conditions
 
@@ -520,7 +520,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.13");
+    const { distanceMeters } = await import("./map.js?v=0.9.14");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
@@ -629,7 +629,7 @@ export async function floatHp(itemId, before) {
   const [it] = await OBR.scene.items.getItems([itemId]);
   const now = getSheet(it)?.pkmn?.hp?.current;
   if (now == null || now === before) return;
-  const { FX_CHANNEL } = await import("./map.js?v=0.9.13");
+  const { FX_CHANNEL } = await import("./map.js?v=0.9.14");
   const text = now < before ? `-${before - now}` : `+${now - before}`;
   await OBR.broadcast.sendMessage(FX_CHANNEL, { from: it.position, hits: [{ to: it.position, kind: now < before ? "hit" : "heal", text }] }, { destination: "ALL" }).catch(() => {});
 }
@@ -674,8 +674,11 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
       }
       // an area's turn (Sunny Day, Whirlpool...): one round less, then straight to the next one
       // came in this round (released / in place of a fainted one): it only acts from the next round
+      // (only the round right before joinRound counts: a joinRound left over from another fight, or
+      // from before the round counter was reset, is dropped instead of skipping turns forever)
       const joinR = getSheet(byId.get(active.id))?.battle?.joinRound;
-      if (joinR != null && round < joinR) {
+      if (joinR != null && round !== joinR - 1) await updateSheet(active.id, (s) => { if (s.battle) delete s.battle.joinRound; }).catch(() => {});
+      if (joinR != null && round === joinR - 1) {
         log.push(`${active.name} entrou nesta rodada: age a partir da próxima`);
         for (const text of log) await pushLog({ kind: "note", attacker: "Combate", text });
         await passTurn(active.id).catch(() => {});
@@ -694,6 +697,8 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
         try { await onTurnStart((await OBR.scene.items.getItems([active.id]))[0]); }
         catch (e) { await pushLog({ kind: "note", attacker: "Combate", text: `Ação preparada de ${active.name} falhou: ${e.message}` }); }
       }
+      // the start of this turn is done (the simulation waits for this before playing it)
+      await OBR.scene.setMetadata({ [TURN_KEY]: { activeId: active.id, round, claim, done: true } });
   }
   return true;
 }

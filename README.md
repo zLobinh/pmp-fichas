@@ -216,12 +216,22 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   divididos entre os treinadores do lado, no máximo um ativo por treinador quando há vários), as reservas de
   cada treinador e a arena (dois cliques no mapa; os iniciais aparecem dentro dela). Depois de "Regras
   prontas", cada lado escolhe os iniciais no próprio popup sem ver os do outro (só "escolhendo"/"pronto").
-  Com todos prontos, a batalha começa sozinha: iniciais em campo, iniciativa de todos, rodada 1.
-- **Simular (só treinadores do mestre):** a extensão joga os turnos: cada Pokémon escolhe o Move de dano
-  que mais machuca um inimigo (vantagem de tipo, chance de derrubar), anda até ele dentro da arena, ataca e
-  passa o turno; quem desmaia volta e a próxima reserva entra. No fim sai o resumo (vencedor, rodadas,
-  nocautes, quem mais causou dano e quem ficou de pé) no popup e no registro. Durante a simulação ninguém
-  reage pelos popups.
+  Com todos prontos, a batalha começa sozinha e limpa: o que sobrou de outra luta sai da iniciativa, rodada 1,
+  iniciais em campo. O popup volta pelo card "⚔ Batalha preparada → Abrir" no painel (ou pelo mesmo botão
+  direito), e o resultado abre sozinho quando a luta acaba. "Encerrar e limpar" (mestre, durante ou depois)
+  tira os lutadores da iniciativa e apaga a arena e as áreas de clima/terreno.
+- **Simular (só treinadores do mestre):** a extensão joga os turnos. Cada Pokémon dá nota a todos os seus
+  Moves e usa o melhor que funcionar: dano num inimigo (chance de acerto contra a CA, tipo, golpes, chance de
+  derrubar, condição extra), dano em área (cone, linha, raio a partir dele, descontando aliados pegos),
+  condições num inimigo sem status e não imune (Thunder Wave, Will-O-Wisp, Sleep Powder...), estágios dele
+  (Swords Dance...) enquanto está saudável, estágios pra baixo no inimigo, cura com pouca vida (ele ou um
+  aliado), clima/terreno que ajudam o tipo dele, telas e Tailwind, hazards se o outro lado tem reservas.
+  Move sem dano não se repete pelo mesmo Pokémon em 4 rodadas, e há um pouco de sorte na escolha. Ela só
+  joga depois que o início do turno foi processado; se um turno travar por 15 s, ela passa. Quando nenhum
+  Move dá certo, o registro diz o porquê. Quem desmaia volta e a próxima reserva entra. No fim sai o resumo
+  (vencedor, rodadas, nocautes, quem mais causou dano e quem ficou de pé). Ninguém reage pelos popups.
+- **Entrou nesta rodada:** só pula a vez na rodada exata em que entrou; um registro velho de outra luta é
+  descartado (era o que travava o Absol pulando a vez sem parar).
 - **Equipe Selvagens:** pra Pokémon que não são de treinador (como Neutros).
 - **Áreas na iniciativa:** o Pretty Sordid só lista tokens, então cada área com duração ganha um marcador
   (uma imagem pequena presa ao círculo) que entra na iniciativa no lugar dela, com as rodadas no nome.

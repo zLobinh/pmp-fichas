@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.13";
-import { describe } from "./combat.js?v=0.9.13";
-import { openSheet, openHud, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.13";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.13";
-import { dicePlusReady } from "./dice.js?v=0.9.13";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.13";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.14";
+import { describe } from "./combat.js?v=0.9.14";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.14";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.14";
+import { dicePlusReady } from "./dice.js?v=0.9.14";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.14";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -35,6 +35,12 @@ function render() {
   const withSheet = state.items.filter((i) => getSheet(i));
   const listed = withSheet.filter((i) => canSeeFull(getSheet(i), viewer));
   root.replaceChildren(...[
+    // a prepared battle (setup, running or finished): the way back to its popup and its result
+    state.prep ? h("div", { class: "card row", style: "gap:6px" },
+      h("b", {}, "⚔ Batalha preparada"),
+      h("span", { class: "muted small" }, { setup: "sendo preparada", running: state.prep.sim ? "sendo simulada" : "em andamento", done: "terminou: veja o resultado" }[state.prep.status] ?? ""),
+      h("span", { class: "spacer" }),
+      h("button", { class: "small primary", onclick: () => openPrep() }, "Abrir")) : null,
     h("div", { class: "card" },
       h("h2", {}, state.role === "GM" ? `Pokémon na cena (${withSheet.length})` : `Sua equipe (${listed.length})`),
       listed.length
@@ -127,12 +133,14 @@ OBR.onReady(async () => {
   const load = async () => {
     if (!(await OBR.scene.isReady())) { state.items = []; state.log = []; return render(); }
     state.items = await OBR.scene.items.getItems((i) => i.metadata[SHEET_KEY] != null);
-    state.log = (await OBR.scene.getMetadata())[LOG_KEY] ?? [];
+    const meta = await OBR.scene.getMetadata();
+    state.log = meta[LOG_KEY] ?? [];
+    state.prep = meta[`${ID}/prep`] ?? null;
     render();
   };
   await load();
   OBR.scene.onReadyChange(load);
   OBR.scene.items.onChange((items) => { state.items = items.filter((i) => i.metadata[SHEET_KEY] != null); render(); });
-  OBR.scene.onMetadataChange((meta) => { state.log = meta[LOG_KEY] ?? []; render(); });
+  OBR.scene.onMetadataChange((meta) => { state.log = meta[LOG_KEY] ?? []; state.prep = meta[`${ID}/prep`] ?? null; render(); });
   OBR.room.onMetadataChange(async () => { state.settings = await getSettings(); render(); });
 });

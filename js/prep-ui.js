@@ -1,10 +1,10 @@
 // The "Preparar batalha" popup. The GM sets the sides, the format, the reserves, the arena and (for a
 // battle between the GM's own trainers) the simulation; each controller picks the starters of the
 // trainers it plays and says "pronto". The others' picks are never shown, only "escolhendo" / "pronto".
-import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.13";
-import { TEAMS } from "./battle.js?v=0.9.13";
-import { trainerOf, party, inBall } from "./trainer.js?v=0.9.13";
-import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena } from "./prep.js?v=0.9.13";
+import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.14";
+import { TEAMS } from "./battle.js?v=0.9.14";
+import { trainerOf, party, inBall } from "./trainer.js?v=0.9.14";
+import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.14";
 
 const POP = `${ID}/prep`;
 const root = document.getElementById("root");
@@ -26,7 +26,7 @@ const mine = (t) => trainerOf(t)?.owner === state.me || (state.isGM && state.npc
 const edit = (fn) => setPrep((p) => { fn(p); return p; });
 
 function gmBlock(p) {
-  if (!state.isGM) return null;
+  if (!state.isGM || p.status === "done") return null;
   const allNpc = state.trainers.every((t) => state.npc[t.id]);
   const lock = p.status !== "setup";
   return h("div", { class: "card" },
@@ -60,7 +60,7 @@ function gmBlock(p) {
       h("button", { class: `small ${p.configured ? "" : "primary"}`, onclick: () => edit((x) => { x.configured = !x.configured; }) },
         p.configured ? "Reabrir as regras" : "Regras prontas: liberar a escolha dos iniciais"),
       h("span", { class: "spacer" }),
-      h("button", { class: "small", onclick: async () => { await clearArena(); await OBR.scene.setMetadata({ [PREP_KEY]: undefined }); OBR.popover.close(POP); } }, "Cancelar batalha")) : null);
+      h("button", { class: "small", onclick: async () => { await endPrep(); OBR.popover.close(POP); } }, "Cancelar batalha")) : null);
 }
 
 // the starters of one of my trainers
@@ -99,9 +99,14 @@ function render() {
       h("span", { class: "spacer" }), h("button", { class: "icon", onclick: () => OBR.popover.close(POP) }, "✕")),
     state.msg ? h("div", { class: "small ok" }, state.msg) : null,
     p.status === "done" && p.result ? h("div", { class: "card prep-result" }, h("h2", {}, "Resultado"), p.result.lines.map((l) => h("div", { class: "small" }, l)),
-      state.isGM ? h("button", { class: "small", style: "margin-top:6px", onclick: async () => { await clearArena(); await OBR.scene.setMetadata({ [PREP_KEY]: undefined }); OBR.popover.close(POP); } }, "Encerrar") : null) : null,
+      state.isGM ? h("button", { class: "small", style: "margin-top:6px", title: "Apaga a arena, as áreas de clima/terreno e este resultado", onclick: async () => { await endPrep(); OBR.popover.close(POP); } }, "Encerrar e limpar o mapa") : null) : null,
     p.status === "running" ? h("div", { class: "card small" }, p.sim ? "🤖 Batalha sendo simulada… acompanhe pelo mapa e pelo registro." : "⚔ Batalha em andamento.",
-      state.isGM && p.sim ? h("button", { class: "small", style: "margin-left:6px", onclick: () => edit((x) => { x.stop = true; x.sim = false; }) }, "Parar a simulação") : null) : null,
+      state.isGM && p.sim ? h("button", { class: "small", style: "margin-left:6px", onclick: () => edit((x) => { x.stop = true; x.sim = false; }) }, "Parar a simulação") : null,
+      state.isGM ? h("button", { class: "small", style: "margin-left:6px", title: "Tira os lutadores da iniciativa e apaga a arena e as áreas de clima/terreno", onclick: async () => {
+        // (two clicks: the popup has no confirm dialog)
+        if (!state.sureEnd) { state.sureEnd = true; render(); setTimeout(() => { state.sureEnd = false; render(); }, 4000); return; }
+        await endPrep(); OBR.popover.close(POP);
+      } }, state.sureEnd ? "Clique de novo pra confirmar" : "Encerrar e limpar") : null) : null,
     gmBlock(p),
     p.status === "setup" && !p.configured ? h("div", { class: "card small muted" }, "Esperando o mestre definir as regras.") : null,
     p.status === "setup" ? state.trainers.filter(mine).map((t) => pickBlock(p, t)) : null,

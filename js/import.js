@@ -1,5 +1,5 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.13";
-import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.13";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.14";
+import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.14";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);

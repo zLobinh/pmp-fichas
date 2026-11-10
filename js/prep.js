@@ -7,14 +7,15 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.13";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, TEAMS } from "./battle.js?v=0.9.13";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.13";
-import { startCombat } from "./qol.js?v=0.9.13";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.13";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.13";
-import { useMove } from "./combat.js?v=0.9.13";
-import { isAreaTurn } from "./field.js?v=0.9.13";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.14";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.14";
+import * as MFX from "./movefx.js?v=0.9.14";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.14";
+import { startCombat } from "./qol.js?v=0.9.14";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.14";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.14";
+import { useMove } from "./combat.js?v=0.9.14";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.14";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -101,6 +102,13 @@ export async function startPrepared(rules) {
   const names = Object.keys(prep.trainers).map((tid) => tid);
   const tNames = (await OBR.scene.items.getItems(names)).map((t) => t.name);
   await pushLog({ kind: "note", attacker: "Batalha", text: `começou: ${tNames.join(" × ")} (${prep.format}v${prep.format}, ${prep.reserves} reserva(s) cada)${prep.sim ? " — simulada" : ""}` });
+  // a clean start: whatever was left of an older fight leaves the initiative (round 1, nobody "came in
+  // this round" with an old round number), and the turn watcher starts over
+  const old = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null && !i.metadata?.[`${ID}/areaMarker`]);
+  if (old.length) await OBR.scene.items.updateItems(old.map((i) => i.id), (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
+  await OBR.scene.setMetadata({ [TURN_KEY]: undefined, "com.pretty-initiative/roundCount": 1 });
+  for (const s of starters) await updateSheet(s.id, (x) => { if (x.battle) { delete x.battle.joinRound; delete x.battle.joinNextRound; delete x.battle.needsInitiative; } });
+  aiMemo.clear();
   await startCombat(rules, starters);
   for (const s of starters) await entryAbilities(rules, (await OBR.scene.items.getItems([s.id]))[0]).catch(() => {});
   return true;
@@ -152,47 +160,209 @@ export async function sidesLeft(prep) {
 }
 
 // ------------------------------------------------------------------ the AI (simulation)
-// The best damaging move ("1 ação") on the enemy it hurts the most, walking up to it inside the arena.
+// Every move the Pokémon has gets a score for this turn and the best one that works is used:
+//  - damage on one enemy: expected damage (hit chance × type × strikes), a bonus when it can knock it
+//    out or also leaves a condition, minus the walk to get there;
+//  - area damage (cone, line, radius from the user): the enemies inside, minus the allies caught too;
+//  - conditions (Thunder Wave, Will-O-Wisp, Toxic, Hypnosis...) on an enemy that has none and isn't immune;
+//  - its own stages (Swords Dance, Calm Mind...) while they're low and it's healthy; stages down on an enemy;
+//  - healing when it (or an ally, for Heal Pulse) is low;
+//  - weather / terrain that help its own type, screens, Tailwind, hazards while the other side has reserves.
+// Non-damaging moves aren't repeated by the same Pokémon within 4 rounds. A little randomness keeps it
+// from always doing the same thing.
 const REACTION_ONLY = (raw) => { const t = moveTiming(raw); return t.reaction && !t.action && !t.bonus; };
+const MAJOR = ["Burning", "Frozen", "Paralyzed", "Poisoned", "BadlyPoisoned", "Drowsy", "Asleep"];
+const STATUS_VALUE = { Asleep: 1.1, Frozen: 1.1, Paralyzed: 0.9, BadlyPoisoned: 0.9, Burning: 0.8, Stunned: 0.8, Drowsy: 0.7, Poisoned: 0.6, Confused: 0.6, Infatuated: 0.4 };
+const STAGE_VALUE = { Attack: 0.35, SpecialAttack: 0.35, Defense: 0.22, SpecialDefense: 0.22, Speed: 0.15, Evasion: 0.25, Accuracy: 0.12, CritMargin: 0.2 };
+const WEATHER_TYPES = { sun: ["Fire", "Grass"], rain: ["Water"], sand: ["Rock", "Ground", "Steel"], hail: ["Ice"], snow: ["Ice"] };
+const TERRAIN_TYPES = { electric: ["Electric"], grassy: ["Grass"], psychic: ["Psychic"], misty: ["Fairy"] };
+const aiMemo = new Map(); // itemId -> { move: round it was last used }
+const jitter = () => 0.88 + Math.random() * 0.24;
+
+const avgDamage = (md) => md.damage ? ((md.damage.amount * (md.damage.dice + 1)) / 2 + md.damage.bonus) * (md.damage.times || 1) * (md.hits || 1) : 0;
+function hitChance(rules, md, target) {
+  if (md.sureHit) return 1;
+  if (md.attackBonus != null) return Math.min(0.95, Math.max(0.05, (21 - (rules.ac(getSheet(target).pkmn) - md.attackBonus)) / 20));
+  if (md.saveDC != null) return 0.55;
+  return 1;
+}
+const immuneTo = (rules, key, sheet) => (CONDITIONS[key]?.immune ?? []).some((t) => rules.types(sheet.pkmn).includes(t));
+const hpRatio = (rules, sheet) => sheet.pkmn.hp.current / Math.max(1, rules.maxHP(sheet.pkmn));
+
+// who an area move from the user would catch, aimed at `aim` (pixels; the area starts at the user)
+async function areaCatch(me, md, aim, everyone, dpi) {
+  const r = md.rangeInfo;
+  const dir = aim ? Math.atan2(aim.position.y - me.position.y, aim.position.x - me.position.x) : 0;
+  const out = [];
+  for (const o of everyone) {
+    if (o.id === me.id) continue;
+    if ((await distanceMeters(me, o)) > r.meters + 0.05) continue;
+    if (r.shape === "radius") { out.push(o); continue; }
+    const dx = o.position.x - me.position.x, dy = o.position.y - me.position.y;
+    const diff = Math.abs(((Math.atan2(dy, dx) - dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    if (r.shape === "cone" && diff <= 0.5) out.push(o);
+    else if (r.shape === "semicircle" && diff <= Math.PI / 2) out.push(o);
+    else if (r.shape === "line" && diff < Math.PI / 2 && Math.abs(Math.sin(diff)) * Math.hypot(dx, dy) <= dpi * 0.75) out.push(o);
+  }
+  return out;
+}
+
 export async function aiTurn(rules, item, prep) {
   const me = (await OBR.scene.items.getItems([item.id]))[0];
   const s = getSheet(me);
   if (!s || s.pkmn.hp.current <= 0) return null;
-  const all = await participants(prep);
+  const all = (await participants(prep)).filter((o) => !inBall(getSheet(o)) && getSheet(o).pkmn.hp.current > 0);
   const mySide = sideOf(prep, me);
-  const enemies = all.filter((o) => !inBall(getSheet(o)) && getSheet(o).pkmn.hp.current > 0 && sideOf(prep, o) !== mySide);
+  const enemies = all.filter((o) => sideOf(prep, o) !== mySide);
+  const friends = all.filter((o) => sideOf(prep, o) === mySide);
   if (!enemies.length) return null;
-  const choices = [];
+  const round = Number((await OBR.scene.getMetadata())["com.pretty-initiative/roundCount"] ?? 1);
+  const memo = aiMemo.get(me.id) ?? {};
+  const fresh = (name) => memo[name] == null || round - memo[name] >= 4;
+  const dpi = await OBR.scene.grid.getDpi();
+  const field = await fieldNow(null, null, me).catch(() => ({}));
+  const myTypes = rules.types(s.pkmn);
+  const myRatio = hpRatio(rules, s);
+  const dist = new Map();
+  for (const o of all) if (o.id !== me.id) dist.set(o.id, await distanceMeters(me, o));
+  const need = (md, o) => md.rangeInfo?.kind === "any" ? 0 : Math.max(0, dist.get(o.id) - (md.rangeInfo?.meters ?? 1.5));
+  const enemyReserves = Object.entries(prep.trainers).some(([tid, t]) => t.side !== mySide && (t.used ?? 0) < activesFor(prep, tid) + (prep.reserves ?? 0));
+
+  // the moves it can use now
+  const moves = [];
   for (const name of Object.keys(s.pkmn.moves ?? {})) {
     const raw = rules.moves[name] ?? {};
     const md = rules.moveData(s.pkmn, name);
-    if (!md.damage || (typeof md.pp === "number" && md.pp <= 0) || REACTION_ONLY(raw)) continue;
-    if (!moveTiming(raw).action || ["self", "area"].includes(md.rangeInfo?.kind)) continue;
-    for (const e of enemies) {
-      const eff = rules.effectiveness(md.type, getSheet(e).pkmn);
-      if (eff === 0) continue;
-      const avg = ((md.damage.amount * (md.damage.dice + 1)) / 2 + md.damage.bonus) * (md.damage.times || 1) * (md.hits || 1) * eff;
-      const finish = getSheet(e).pkmn.hp.current <= avg ? 1.3 : 1; // can knock it out: better
-      const need = Math.max(0, (await distanceMeters(me, e)) - (md.rangeInfo?.meters ?? 1.5));
-      choices.push({ name, md, e, need, score: avg * finish - need * 0.5 });
+    if (md.missing || (typeof md.pp === "number" && md.pp <= 0) || REACTION_ONLY(raw) || !moveTiming(raw).action) continue;
+    const mfx = MFX.special(name, raw);
+    if (mfx.heal && !raw.atk && !raw.Save) md.damage = null;
+    moves.push({ name, raw, md, fx: moveEffects(raw), mfx });
+  }
+  // what a plain attack is worth: the yardstick for the moves that don't deal damage
+  let ref = 8;
+  for (const m of moves) for (const e of enemies) if (m.md.damage && m.md.rangeInfo?.kind !== "area") ref = Math.max(ref, avgDamage(m.md) * rules.effectiveness(m.md.type, getSheet(e).pkmn) * hitChance(rules, m.md, e));
+
+  const plans = [];
+  const add = (p) => { if (p.score > 0) plans.push({ ...p, score: p.score * jitter() }); };
+  for (const { name, raw, md, fx, mfx } of moves) {
+    const kind = md.rangeInfo?.kind;
+    const fm = FIELD_MOVES[name];
+    // ---- weather, terrain, screens, hazards
+    if (fm) {
+      if (!fresh(name)) continue;
+      let v = 0;
+      if (fm.weather && field.weather !== fm.weather && (WEATHER_TYPES[fm.weather] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.7;
+      else if (fm.terrain && field.terrain !== fm.terrain && (TERRAIN_TYPES[fm.terrain] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.6;
+      else if (fm.side && !fm.needs) v = ref * 0.45;
+      else if (fm.side && fm.needs?.includes(field.weather)) v = ref * 0.6;
+      else if (fm.hazard && enemyReserves) v = ref * 0.4;
+      if (!v) continue;
+      const e = fm.at === "target" ? enemies[0] : null;
+      add({ name, md, kind: "field", targets: e ? [e] : [], opts: { ignoreRange: true }, need: 0, score: v });
+      continue;
+    }
+    // ---- area damage
+    if (kind === "area" && md.damage) {
+      for (const aim of md.rangeInfo.shape === "radius" ? [null] : enemies) {
+        const caught = await areaCatch(me, md, aim, all, dpi);
+        let v = 0;
+        for (const o of caught) {
+          const dmg = avgDamage(md) * rules.effectiveness(md.type, getSheet(o).pkmn) * hitChance(rules, md, o);
+          if (sideOf(prep, o) === mySide) v -= dmg * 1.5;
+          else v += dmg * (getSheet(o).pkmn.hp.current <= dmg ? 1.3 : 1);
+        }
+        add({ name, md, kind: "area", targets: caught, opts: { area: true }, need: 0, score: v });
+      }
+      continue;
+    }
+    // ---- healing
+    if (mfx.heal) {
+      if (!fresh(name) && !mfx.heal.self) continue;
+      const amount = mfx.heal.table ? rules.maxHP(s.pkmn) * 0.35 : (mfx.heal.amount ?? 2) * ((mfx.heal.sides ?? 6) + 1) / 2 + 3;
+      if (mfx.heal.self || kind === "self") {
+        if (myRatio < 0.5 && !(mfx.heal.rest && myRatio > 0.3)) add({ name, md, kind: "heal", targets: kind === "self" ? [] : [me], opts: {}, need: 0, score: Math.min(amount, rules.maxHP(s.pkmn) - s.pkmn.hp.current) * (1.7 - myRatio) });
+      } else {
+        for (const f of friends) {
+          const r = hpRatio(rules, getSheet(f));
+          if (f.id === me.id || r >= 0.5) continue;
+          add({ name, md, kind: "heal", targets: [f], opts: {}, need: need(md, f), score: Math.min(amount, rules.maxHP(getSheet(f).pkmn) - getSheet(f).pkmn.hp.current) * (1.5 - r) - need(md, f) * 0.5 });
+        }
+      }
+      continue;
+    }
+    // ---- its own stages (Swords Dance, Calm Mind, Dragon Dance...)
+    if (!md.damage && fx.self?.length && kind === "self") {
+      if (!fresh(name) || myRatio < 0.5 || (fx.hpCost && myRatio < 0.65)) continue;
+      let v = 0;
+      for (const st of fx.self) if (st.delta > 0 && (s.pkmn.stages?.[st.stat] ?? 0) < 3) v += ref * (STAGE_VALUE[st.stat] ?? 0.1) * Math.min(st.delta, 2);
+      add({ name, md, kind: "buff", targets: [], opts: {}, need: 0, score: v });
+      continue;
+    }
+    // ---- conditions and stages down on an enemy (no damage)
+    const cond = !md.damage ? (fx.statusDirect ?? fx.contest?.status ?? fx.statusFail ?? null) : null;
+    const drops = !md.damage ? [...(fx.direct ?? []), ...(fx.fail ?? []), ...(fx.contest?.stages ?? [])].filter((x) => x.delta < 0) : [];
+    if (!md.damage && (cond || drops.length) && kind !== "self") {
+      if (!fresh(name)) continue;
+      const worth = (e) => {
+        const es = getSheet(e);
+        const p = fx.contest ? 0.6 : hitChance(rules, md, e);
+        let v = 0;
+        if (cond && !immuneTo(rules, cond, es) && !conditionsOf(es)[cond] && !(MAJOR.includes(cond) && Object.keys(conditionsOf(es)).some((k) => MAJOR.includes(k)))) {
+          v += ref * (STATUS_VALUE[cond] ?? 0.5) * (hpRatio(rules, es) > 0.4 ? 1 : 0.4);
+        }
+        for (const d0 of drops) if ((es.pkmn.stages?.[d0.stat] ?? 0) > -3) v += ref * (STAGE_VALUE[d0.stat] ?? 0.1) * 0.8 * Math.min(-d0.delta, 2);
+        return v * p;
+      };
+      if (kind === "area") {
+        // from where it stands: the enemies caught, minus the allies caught too
+        for (const aim of md.rangeInfo.shape === "radius" ? [null] : enemies) {
+          const caught = await areaCatch(me, md, aim, all, dpi);
+          const v = caught.reduce((sum, o) => sum + (sideOf(prep, o) === mySide ? -worth(o) : worth(o)), 0);
+          add({ name, md, kind: "status", targets: caught, opts: { area: true }, need: 0, score: v });
+        }
+        continue;
+      }
+      for (const e of enemies) add({ name, md, kind: "status", targets: [e], opts: {}, need: need(md, e), score: worth(e) - need(md, e) * 0.5 });
+      continue;
+    }
+    // ---- damage on one enemy
+    if (md.damage && kind !== "self" && kind !== "area") {
+      for (const e of enemies) {
+        const es = getSheet(e);
+        const eff = rules.effectiveness(md.type, es.pkmn);
+        if (eff === 0) continue;
+        const dmg = avgDamage(md) * eff;
+        let v = dmg * hitChance(rules, md, e);
+        if (es.pkmn.hp.current <= dmg) v *= 1.4; // can knock it out
+        const extra = fx.statusHit ?? fx.natural?.status;
+        if (extra && !immuneTo(rules, extra, es) && !Object.keys(conditionsOf(es)).some((k) => MAJOR.includes(k))) v *= fx.statusHit ? 1.15 : 1.05;
+        if (fx.self?.some((x) => x.delta < 0)) v *= 0.92; // Close Combat, Overheat...
+        if (mfx.recoil) v *= 0.9;
+        if (mfx.selfKO) v *= enemies.length === 1 && es.pkmn.hp.current <= dmg ? 1 : 0.2;
+        add({ name, md, kind: "hit", targets: [e], opts: {}, need: need(md, e), score: v - need(md, e) * 0.5 });
+      }
     }
   }
-  choices.sort((a, b) => b.score - a.score);
-  if (!choices.length) choices.push(...enemies.map((e) => ({ name: "Struggle", md: rules.moveData(s.pkmn, "Struggle"), e, need: 1, score: 0 })));
+  plans.sort((a, b) => b.score - a.score);
+  if (!plans.length) plans.push(...enemies.map((e) => ({ name: "Struggle", md: rules.moveData(s.pkmn, "Struggle"), kind: "hit", targets: [e], opts: {}, need: need({ rangeInfo: { meters: 1.5 } }, e), score: 0 })));
   const left = movement(rules, me).left;
-  for (const c of choices) {
+  const fails = [];
+  for (const c of plans.slice(0, 12)) {
     let cur = (await OBR.scene.items.getItems([me.id]))[0];
     if (c.need > 0.05) {
-      const spot = await approach(rules, cur, c.e, c.md, { maxCost: left }).catch(() => null);
+      const spot = await approach(rules, cur, c.targets[0], c.md, { maxCost: left }).catch(() => null);
       if (!spot || !inArena(prep.arena, spot.pos)) continue;
       await moveToken(me.id, spot.pos, spot.cost);
       cur = (await OBR.scene.items.getItems([me.id]))[0];
     }
     try {
-      const entry = await useMove(rules, cur, c.name, [(await OBR.scene.items.getItems([c.e.id]))[0]], {});
-      return { move: c.name, target: c.e, entry };
-    } catch { /* out of range, no action, restricted: try the next one */ }
+      const targets = c.targets.length ? await OBR.scene.items.getItems(c.targets.map((t) => t.id)) : [];
+      const entry = await useMove(rules, cur, c.name, targets, c.opts);
+      if (c.kind !== "hit" && c.kind !== "area") aiMemo.set(me.id, { ...memo, [c.name]: round });
+      return { move: c.name, targets, entry };
+    } catch (e) { fails.push(`${c.name}: ${e.message}`); } // out of range, no action, restricted: the next one
   }
+  if (fails.length) await pushLog({ kind: "note", attacker: me.name, text: `não conseguiu usar um move (${[...new Set(fails)].slice(0, 2).join("; ")})` });
   // nobody in reach: walk towards the nearest enemy (inside the arena)
   const near = enemies.sort((a, b) => Math.hypot(a.position.x - me.position.x, a.position.y - me.position.y) - Math.hypot(b.position.x - me.position.x, b.position.y - me.position.y))[0];
   for (const f of [1, 0.75, 0.5, 0.25]) {
@@ -209,6 +379,7 @@ export async function runSim(rules) {
   if (simLock) return;
   simLock = true;
   const stats = { dealt: {}, kos: [], turns: 0, round: 1 };
+  const stuck = { key: null, since: Date.now() };
   try {
     for (let guard = 0; guard < 600; guard++) {
       const prep = await getPrep();
@@ -220,13 +391,20 @@ export async function runSim(rules) {
       const active = items.find(isActive);
       const meta = await OBR.scene.getMetadata();
       stats.round = Number(meta["com.pretty-initiative/roundCount"] ?? stats.round);
-      // the GM's watcher runs the start of each turn first (conditions, weather...)
-      if (!active || meta[TURN_KEY]?.activeId !== active.id) { await wait(250); continue; }
-      if (isAreaTurn(active)) { await wait(300); continue; } // the watcher passes those
+      // the GM's watcher runs the start of each turn first (conditions, weather...); if it doesn't
+      // get to it in 15 s, the simulation passes that turn itself instead of waiting forever
+      const waitKey = `${active?.id}:${stats.round}`;
+      if (waitKey !== stuck.key) Object.assign(stuck, { key: waitKey, since: Date.now() });
+      const waiting = !active || meta[TURN_KEY]?.activeId !== active.id || !meta[TURN_KEY]?.done || isAreaTurn(active)
+        || (getSheet(active)?.battle?.joinRound != null && stats.round === getSheet(active).battle.joinRound - 1);
+      if (waiting) {
+        if (active && Date.now() - stuck.since > 15000) { await passTurn(active.id).catch(() => {}); stuck.since = Date.now(); }
+        await wait(300);
+        continue;
+      }
       const s = getSheet(active);
       const ids = Object.keys(prep.trainers);
       if (!s || !ids.includes(s.trainer)) { await passTurn(active.id); await wait(400); continue; }
-      if (s.battle?.joinRound != null && stats.round < s.battle.joinRound) { await wait(300); continue; }
       // who loses how much on this turn
       const before = new Map((await participants(prep)).map((p) => [p.id, getSheet(p).pkmn.hp.current]));
       await aiTurn(rules, active, prep).catch(() => null);
@@ -281,7 +459,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.13")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.14")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])
@@ -292,6 +470,20 @@ export async function drawArena(a, b) {
 export async function clearArena() {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
+}
+
+// "Encerrar e limpar": stops the simulation, takes the fighters out of the initiative and removes what
+// the battle left on the map (the arena, weather/terrain/screen areas and their markers)
+export async function endPrep() {
+  const prep = await getPrep();
+  if (prep?.status === "running") await setPrep((p) => (p ? { ...p, stop: true, sim: false } : p));
+  const ids = Object.keys(prep?.trainers ?? {});
+  const inInit = await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY] != null && ids.includes(i.metadata?.[SHEET_KEY]?.trainer));
+  if (inInit.length) await OBR.scene.items.updateItems(inInit.map((i) => i.id), (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
+  const areas = await OBR.scene.items.getItems((i) => !!i.metadata?.[AREA_KEY]);
+  await removeAreas(areas.map((a) => a.id)).catch(() => {});
+  await clearArena();
+  await OBR.scene.setMetadata({ [PREP_KEY]: undefined, [TURN_KEY]: undefined, "com.pmp-fichas/field": {} });
 }
 
 // is this trainer played by the GM? (its owner is the GM, or a player who isn't in the room)
