@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.6";
-import { fmtM } from "./rules.js?v=0.9.6";
-import { getRoller } from "./dice.js?v=0.9.6";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.7";
+import { fmtM } from "./rules.js?v=0.9.7";
+import { getRoller } from "./dice.js?v=0.9.7";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -110,16 +110,27 @@ export async function rollInitiative(rules, item) {
   const sheet = getSheet(item);
   const pkmn = sheet.pkmn;
   // Velocidade: + stage x proficiency (pág. 73)
-  const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn);
+  // abilities and weather: Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Unburden (+2× prof.),
+  // Quick Feet (×1,5, ignores paralysis), Slow Start (½), Stall (always last)
+  const { initiativeMods } = await import("./abilities.js?v=0.9.7");
+  const { fieldNow } = await import("./field.js?v=0.9.7");
+  const im = initiativeMods(rules, sheet, await fieldNow().catch(() => ({})));
+  const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn) + im.add;
   const settings = await getSettings();
   const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
   const { nat: natRoll } = await roller.d20(bonus, `${item.name || rules.name(pkmn)} iniciativa`);
   const nat = natRoll;
   // Paralisado: initiative value halved (pág. 72)
-  const paralyzed = !!(sheet.battle?.cond?.Paralyzed || pkmn.statuses?.Paralyzed);
-  const total = paralyzed ? Math.floor((nat + bonus) / 2) : nat + bonus;
+  const paralyzed = !!(sheet.battle?.cond?.Paralyzed || pkmn.statuses?.Paralyzed) && !im.ignoreParalysis;
+  let total = Math.floor((paralyzed ? Math.floor((nat + bonus) / 2) : nat + bonus) * im.mult);
+  if (im.stall) {
+    // Stall: the lowest initiative in the fight − 1
+    const counts = (await OBR.scene.items.getItems((i) => i.id !== item.id && typeof i.metadata?.[PRETTY_KEY]?.count === "string")).map((i) => parseFloat(i.metadata[PRETTY_KEY].count) || 0);
+    if (counts.length) total = Math.min(...counts) - 1;
+  }
   await setInitiative(item.id, total);
-  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: paralyzed ? "Iniciativa (paralisado, metade)" : "Iniciativa", nat, bonus, total, roller: roller.name };
+  const label = ["Iniciativa", paralyzed ? "paralisado, metade" : null, ...im.notes, im.stall ? "Stall: por último" : null].filter(Boolean);
+  const entry = { kind: "check", attacker: item.name || rules.name(pkmn), label: label.length > 1 ? `${label[0]} (${label.slice(1).join(", ")})` : label[0], nat, bonus, total, roller: roller.name };
   await pushLog(entry);
   return entry;
 }

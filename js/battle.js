@@ -8,8 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.6";
-import { d } from "./rules.js?v=0.9.6";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.7";
+import { d } from "./rules.js?v=0.9.7";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.7";
+import { fieldNow, expireField, grounded } from "./field.js?v=0.9.7";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.7";
 
 // ------------------------------------------------------------------ conditions
 
@@ -49,14 +52,19 @@ function syncAppStatuses(sheet) {
 }
 
 // tries to give a condition; returns { ok, reason } (the draft is changed in place)
-export function giveCondition(sheet, key, rules, { ownTurn = false } = {}) {
+// opts.block(key): an ability/field reason that stops it (abilities.statusBlock); opts.corrosion: the
+// source has Corrosion (poisons Poison and Steel types)
+export function giveCondition(sheet, key, rules, { ownTurn = false, block = null, corrosion = false } = {}) {
   const c = CONDITIONS[key];
   if (!c) return { ok: false, reason: "condição desconhecida" };
   sheet.battle ??= {};
   sheet.battle.cond = conditionsOf(sheet);
   const cond = sheet.battle.cond;
   const types = rules.types(sheet.pkmn);
-  if (c.immune.some((t) => types.includes(t))) return { ok: false, reason: `imune (tipo ${types.join("/")})` };
+  const poison = key === "Poisoned" || key === "BadlyPoisoned";
+  if (c.immune.some((t) => types.includes(t)) && !(corrosion && poison)) return { ok: false, reason: `imune (tipo ${types.join("/")})` };
+  const why = block?.(key);
+  if (why) return { ok: false, reason: `imune (${why})` };
   const grace = sheet.battle.grace?.[key];
   if (grace != null && (sheet.battle.turns ?? 0) <= grace) return { ok: false, reason: "período de carência" };
   if (cond[key]) {
@@ -291,7 +299,7 @@ export class TurnError extends Error {
 
 // decides which action a move spends right now, or throws TurnError
 // combatRunning: someone is active in Pretty Sordid
-export function chooseCost(item, move, combatRunning) {
+export function chooseCost(item, move, combatRunning, rules = null) {
   if (!combatRunning || !inInitiative(item)) return null; // free play: nothing is tracked
   const sheet = getSheet(item);
   const econ = econOf(sheet);
@@ -305,6 +313,9 @@ export function chooseCost(item, move, combatRunning) {
     }
     if (t.action && econ.action) return { spend: ["action"], label: "ação" };
     if (t.bonus && econ.bonus) return { spend: ["bonus"], label: "ação bônus" };
+    // Prankster (status), Gale Wings (Flying at full HP), Triage (healing): the action move as a bonus action
+    const alt = t.action && econ.bonus && rules ? bonusAllowed(rules, sheet, move, move) : null;
+    if (alt) return { spend: ["bonus"], label: `ação bônus (${alt.by})`, losesNextAction: !!alt.losesNextAction };
     // "1 ação / reação" moves (Quick Attack, Vacuum Wave, Pursuit...): the reaction form is only used
     // out of its own turn (the book), so on its turn with the action gone it fails instead of
     // burning the reaction that an attack of opportunity would need
@@ -411,6 +422,14 @@ function damageNow(sheet, n) {
 export async function endTurn(rules, item) {
   const notes = [];
   const sleepRoll = has(getSheet(item), "Asleep") ? d(6) : null;
+  const field = await fieldNow();
+  const s0 = getSheet(item);
+  const ab0 = abilitiesOf(rules, s0);
+  const isGrounded = grounded(s0, ab0);
+  // Bad Dreams: an enemy with it on the field hurts this one while it sleeps
+  const enemies = await OBR.scene.items.getItems((i) => i.id !== item.id && i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball);
+  const badDreams = enemies.some((o) => !allies(getSheet(o), s0) && abilitiesOf(rules, getSheet(o)).includes("Bad Dreams"));
+  let cross = {};
   await updateSheet(item.id, (sheet) => {
     const b = sheet.battle;
     // a charge/invulnerable phase not used by the end of its next turn is lost
@@ -426,15 +445,32 @@ export async function endTurn(rules, item) {
     const prof = rules.proficiency(sheet.pkmn);
     const lvl = rules.level(sheet.pkmn);
     const wasUp = sheet.pkmn.hp.current > 0;
+    // condition damage, with Magic Guard / Poison Heal / Heatproof (abilities.js)
+    const condHit = (key, base, label) => {
+      const r = conditionDamage(rules, sheet, key, base);
+      if (r.heal) { sheet.pkmn.hp.current = Math.min(rules.maxHP(sheet.pkmn), sheet.pkmn.hp.current + r.heal); notes.push(`${label}: ${r.note} +${r.heal} HP`); return; }
+      damageNow(sheet, r.amount);
+      notes.push(`${label}: ${r.amount ? `−${r.amount} HP` : ""}${r.note ? ` (${r.note})` : ""}`);
+    };
     if (wasUp) {
-      if (cond.Burning) { damageNow(sheet, prof); notes.push(`🔥 Queimado: −${prof} HP`); }
-      if (cond.Poisoned) { const n = Math.max(2, Math.ceil(lvl / 2)); damageNow(sheet, n); notes.push(`☠️ Envenenado: −${n} HP`); }
+      if (cond.Burning) condHit("Burning", prof, "🔥 Queimado");
+      if (cond.Poisoned) condHit("Poisoned", Math.max(2, Math.ceil(lvl / 2)), "☠️ Envenenado");
       if (cond.BadlyPoisoned) {
         const c = cond.BadlyPoisoned.count ?? 1;
-        damageNow(sheet, prof * c); notes.push(`☣️ Gravemente Envenenado (${c}º turno): −${prof * c} HP`);
+        condHit("BadlyPoisoned", prof * c, `☣️ Gravemente Envenenado (${c}º turno)`);
         cond.BadlyPoisoned.count = c + 1;
       }
     }
+    // abilities at the end of its turn (Speed Boost, Shed Skin, Rain Dish...), then the moves'
+    // counters (Leech Seed, Perish Song, Yawn, Wish, Outrage, Taunt...), then Grassy Terrain
+    const heal = (n) => { sheet.pkmn.hp.current = Math.min(rules.maxHP(sheet.pkmn), sheet.pkmn.hp.current + n); };
+    const hurt = (n) => damageNow(sheet, n);
+    notes.push(...endTurnAbilities(rules, sheet, { field, grounded: isGrounded, badDreams }, { addStage, clearCondition, heal, hurt }));
+    const mv = endTurnMoves(rules, sheet, { conditionGive: (k) => giveCondition(sheet, k, rules, { block: (key) => statusBlock(rules, sheet, key, { field, grounded: isGrounded, team: teamOf(sheet) }) }) });
+    notes.push(...mv.notes);
+    cross = mv.cross;
+    const gh = grassyHeal(rules, sheet, field, isGrounded);
+    if (gh) notes.push(gh);
     if (cond.Asleep) {
       const age = (cond.Asleep.age ?? 0) + 1;
       cond.Asleep.age = age;
@@ -458,6 +494,31 @@ export async function endTurn(rules, item) {
     syncAppStatuses(sheet);
     if (wasUp && sheet.pkmn.hp.current <= 0) notes.push("😵 Desmaiou");
   });
+  // Leech Seed: what it drained heals the seeder (or another Pokémon of its side on the field)
+  if (cross.seedHeal?.amount > 0) {
+    const all = await OBR.scene.items.getItems((i) => i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball && i.metadata[SHEET_KEY].pkmn.hp.current > 0);
+    const to = all.find((i) => i.id === cross.seedHeal.by) ?? all.find((i) => teamOf(getSheet(i)) === cross.seedHeal.team);
+    if (to) {
+      const ooze = abilitiesOf(rules, getSheet(item)).includes("Liquid Ooze");
+      await updateSheet(to.id, (s) => {
+        const max = rules.maxHP(s.pkmn);
+        s.pkmn.hp.current = ooze ? Math.max(0, s.pkmn.hp.current - cross.seedHeal.amount) : Math.min(max, s.pkmn.hp.current + cross.seedHeal.amount);
+      });
+      notes.push(`🌱 ${to.name} ${ooze ? "perdeu" : "recuperou"} ${cross.seedHeal.amount} HP${ooze ? " (Liquid Ooze)" : ""}`);
+    }
+  }
+  // Healer: allies within 6 m with a condition may be cured (d20 15+)
+  if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
+    const { distanceMeters } = await import("./map.js?v=0.9.7");
+    for (const o of enemies) {
+      const os = getSheet(o);
+      if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
+      const n = d(20);
+      if (n < 15) continue;
+      await updateSheet(o.id, (s) => { for (const k of Object.keys(conditionsOf(s))) clearCondition(s, k); });
+      notes.push(`Healer (${n}): ${o.name} curado`);
+    }
+  }
   return notes;
 }
 
@@ -465,8 +526,13 @@ export async function endTurn(rules, item) {
 export async function startTurn(rules, item) {
   const notes = [];
   const thawRoll = has(getSheet(item), "Frozen") ? d(6) : null;
+  const field = await fieldNow();
+  const ab0 = abilitiesOf(rules, getSheet(item));
+  const isGrounded = grounded(getSheet(item), ab0);
   await updateSheet(item.id, (sheet) => {
     const b = sheet.battle;
+    notes.push(...startTurnField(rules, sheet, field, ab0, isGrounded, { clearCondition }));
+    if (b.truantLazy && ab0.includes("Truant")) notes.push("🦥 Truant: neste turno não usa Moves");
     const cond = conditionsOf(sheet);
     b.cond = cond;
     const recharging = !!b.econ?.loseReaction;
@@ -568,6 +634,9 @@ export async function processTurn(rules, { onTurnStart, onNewRound } = {}) {
       }
       if (prev.round != null && round !== prev.round) {
         await newRound(sheets);
+        // weather, terrain, screens... that ran out (field.js)
+        const gone = await expireField().catch(() => []);
+        if (gone.length) log.push(`Campo: ${gone.join("; ")}`);
         if (onNewRound) {
           try { await onNewRound(); }
           catch (e) { await pushLog({ kind: "note", attacker: "Combate", text: `Iniciativa de quem entrou na troca: ${e.message}` }); }

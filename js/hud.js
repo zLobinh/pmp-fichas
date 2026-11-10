@@ -1,17 +1,18 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.6";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.6";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.6";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.7";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.7";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.7";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.6";
-import { rollPending } from "./trainer.js?v=0.9.6";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.6";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.6";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.6";
-import { runPrepared } from "./prepared.js?v=0.9.6";
-import { seesTarget } from "./combat.js?v=0.9.6";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.6";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.7";
+import { rollPending } from "./trainer.js?v=0.9.7";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.7";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.7";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.7";
+import { runPrepared } from "./prepared.js?v=0.9.7";
+import { fieldNow, fieldText } from "./field.js?v=0.9.7";
+import { seesTarget } from "./combat.js?v=0.9.7";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.7";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -352,7 +353,7 @@ function moveRow(m) {
         // turn/action check first, so nobody aims for nothing
         try {
           const running = (await OBR.scene.items.getItems((i) => i.metadata?.["com.pretty-initiative/metadata"]?.active === true)).length > 0;
-          chooseCost(state.item, state.rules.moves[m.name] ?? {}, running);
+          chooseCost(state.item, state.rules.moves[m.name] ?? {}, running, state.rules);
           state.forceArea = false;
         } catch (e) {
           if (!(e instanceof TurnError)) throw e;
@@ -623,6 +624,26 @@ markHudAlive();
 const heartbeat = setInterval(markHudAlive, 1000);
 addEventListener("pagehide", () => markHudAlive(false));
 
+// what the moves left on this Pokémon (Leech Seed, Taunt, Substitute, Perish Song...)
+function battleTags(sheet) {
+  const b = sheet?.battle ?? {};
+  const t = [];
+  if (b.sub) t.push(`🧸 Substitute ${b.sub} HP`);
+  if (b.seeded) t.push("🌱 semeado");
+  if (b.cursed) t.push("👻 amaldiçoado");
+  if (b.perish != null) t.push(`🎵 Perish ${b.perish}`);
+  if (b.yawn != null) t.push("🥱 Yawn");
+  if (b.wish) t.push("⭐ Wish");
+  if (b.locked) t.push(`😤 ${b.locked.move} (${b.locked.left})`);
+  if (b.stockpile) t.push(`Stockpile ${b.stockpile}`);
+  if (b.charged) t.push(`⚡ ${b.charged}`);
+  if (b.truantLazy) t.push("🦥 Truant: preguiça neste turno");
+  if (b.disabled) t.push(`${b.disabled.move} bloqueado`);
+  for (const [k, v] of Object.entries(b.restrict ?? {})) t.push(`${{ taunt: "Taunt", encore: `Encore${v.move ? ` (${v.move})` : ""}`, disable: `Disable (${v.move})`, torment: "Torment", healBlock: "Heal Block" }[k] ?? k} ${v.turns}`);
+  if (b.ability) t.push(`habilidade: ${b.ability}`);
+  return t;
+}
+
 function render() {
   const sheet = getSheet(state.item);
   if (!sheet) {
@@ -644,6 +665,8 @@ function render() {
     hpBlock(pkmn),
     rules.feats(pkmn).length ? h("div", { class: "small muted hud-feats" }, "Talentos: ",
       [...new Set(rules.feats(pkmn))].map((f, i) => h("span", { title: rules.featText?.[f] ?? "" }, `${i ? ", " : ""}${f}`))) : null,
+    state.field && fieldText(state.field) ? h("div", { class: "small hud-field" }, fieldText(state.field)) : null,
+    battleTags(sheet).length ? h("div", { class: "row small", style: "gap:4px;flex-wrap:wrap;margin:2px 0" }, battleTags(sheet).map((t) => h("span", { class: "chip down" }, t))) : null,
     initiativeBlock(pkmn),
     oaBlock(),
     switchBlock(),
@@ -703,7 +726,10 @@ OBR.onReady(async () => {
   state.viewer = { id: OBR.player.id, role: state.isGM ? "GM" : "PLAYER" };
   await setAttacker(state.attackerId);
   state.running = await running();
+  state.field = await fieldNow().catch(() => null);
   render();
+  // weather / terrain / screens line (field.js)
+  OBR.scene.onMetadataChange(async () => { state.field = await fieldNow().catch(() => null); render(); });
   OBR.scene.items.onChange(async (items) => {
     const it = items.find((i) => i.id === state.attackerId);
     if (it) state.item = it;

@@ -150,7 +150,8 @@ export class Rules {
     return 2;
   }
   // melee reach (pág. 54): 1,5 m up to Grande, 3 m above that
-  reach(pkmn) { return this.sizeRank(pkmn) >= 4 ? 3 : 1.5; }
+  // "Long Reach": +1,5 m with every melee attack
+  reach(pkmn) { return (this.sizeRank(pkmn) >= 4 ? 3 : 1.5) + (this.abilities(pkmn).includes("Long Reach") ? 1.5 : 0); }
   hasFeat(pkmn, feat) { return this.featCount(pkmn, feat) > 0; }
   // skill check bonus: attribute mod + proficiency when the species has the skill
   skillMod(pkmn, skill, attr) {
@@ -222,11 +223,12 @@ export class Rules {
     const desc = move.Description ?? "";
     // "Faça dois/três ataques": one attack roll per strike (Double Kick, Dual Wingbeat, Triple Axel...);
     // the app's Move Power already carries the "com -1" of the text
-    const many = /fa[çc]a\s+(dois|duas|tr[êe]s|2|3)\s+ataques/i.exec(desc);
+    const many = /fa[çc]a\s+(?:at[ée]\s+)?(dois|duas|tr[êe]s|2|3)\s+ataques/i.exec(desc);
     if (many) {
       out.hits = { dois: 2, duas: 2, "2": 2 }[many[1].toLowerCase()] ?? 3;
       out.firstOnlyBonus = /apenas ao dano do primeiro golpe/i.test(desc);
-      out.scaleDice = /triplo da quantidade de dados/i.test(desc); // Triple Axel: 1x, 2x, 3x the dice
+      out.scaleDice = /triplo da quantida\s?de de dados/i.test(desc); // Triple Axel/Kick: 1x, 2x, 3x the dice
+      out.stopOnMiss = /se um deles errar, o move termina/i.test(desc); // Triple Kick
     }
     // "acerto garantido" (Swift, Aerial Ace...): no attack against the AC, the d20 only says if it's a crit
     if (move.atk !== true && !many && move.Damage && !move.Save
@@ -261,9 +263,12 @@ export class Rules {
 
   // damage multiplier of a move type against a defender
   effectiveness(moveType, defender) {
+    return this.typeMult(moveType, this.types(defender));
+  }
+  typeMult(moveType, types) {
     if (!moveType || moveType === "Typeless") return 1;
     let m = 1;
-    for (const t of this.types(defender)) m *= CHART[moveType]?.[t] ?? 1;
+    for (const t of types) m *= CHART[moveType]?.[t] ?? 1;
     return m;
   }
 }

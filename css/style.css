@@ -198,6 +198,7 @@ body.defend-body { background: var(--panel, #1e2231); }
 .chip.trait { cursor: pointer; }
 .trait-text { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--accent); background: var(--panel-2); border-radius: 4px; white-space: pre-line; }
 .hud-feats { margin: 2px 0 4px; }
+.hud-field { margin: 2px 0; padding: 3px 6px; border-radius: 6px; background: var(--panel-2); }
 .hud-feats span[title]:not([title=""]) { cursor: help; text-decoration: underline dotted; }
 
 /* trainer panel: the "Trainer Card" (always dark, like the card) */

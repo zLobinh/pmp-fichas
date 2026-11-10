@@ -14,10 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.6";
-import { d, fmtM } from "./rules.js?v=0.9.6";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.6";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.6";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.7";
+import { d, fmtM } from "./rules.js?v=0.9.7";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.7";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.7";
+import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.7";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.7";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -153,7 +155,14 @@ export async function release(rules, pokemon, trainerItem, { pos = null, quiet =
   const s0 = getSheet(pokemon);
   if (!inBall(s0)) return;
   const at = pos ?? await freeSpotNear(trainerItem.position, [pokemon.id]);
+  // Healing Wish / Lunar Dance waiting on the trainer: the next one out comes back healed
+  const wish = !!trainerOf(trainerItem)?.healingWish;
+  if (wish) await OBR.scene.items.updateItems([trainerItem.id], (ds) => { for (const d0 of ds) { const t0 = { ...d0.metadata[TRAINER] }; delete t0.healingWish; d0.metadata[TRAINER] = t0; } });
   await updateSheet(pokemon.id, (s, dr) => {
+    if (wish) {
+      s.pkmn.hp.current = rules.maxHP(s.pkmn);
+      for (const k of Object.keys(conditionsOf(s))) clearCondition(s, k, { grace: false });
+    }
     dr.scale = { ...(s.ball?.scale ?? { x: 1, y: 1 }) };
     dr.visible = true;
     dr.locked = false;
@@ -288,8 +297,14 @@ export async function entryAbilities(rules, item) {
     for (const e of await near(enemies, 9)) {
       const es = getSheet(e);
       if (rules.abilities(es.pkmn).includes("Guard Dog")) { await updateSheet(e.id, (x) => addStage(x.pkmn, "Attack", 1)); notes.push(`${e.name} (Guard Dog) Ataque +1`); continue; }
+      if (abilitiesOf(rules, es).includes("Scrappy")) { notes.push(`${e.name} (Scrappy) é imune a Intimidate`); continue; }
       const n = d(20), total = n + (rules.saves(es.pkmn).WIS ?? 0);
-      if (n === 1 || (n !== 20 && total < dc)) { await updateSheet(e.id, (x) => addStage(x.pkmn, "Attack", -1)); notes.push(`${e.name} falhou (SAB ${total} vs CD ${dc}): Ataque −1`); }
+      if (n === 1 || (n !== 20 && total < dc)) {
+        // Clear Body, Hyper Cutter, Contrary, Defiant, Mirror Armor... (abilities.stageGuard)
+        let g = null;
+        await updateSheet(e.id, (x) => { g = stageGuard(rules, x, [{ stat: "Attack", delta: -1 }], { fromOther: true }); for (const st of g.list) addStage(x.pkmn, st.stat, st.delta); });
+        notes.push(`${e.name} falhou (SAB ${total} vs CD ${dc})${g.list.length ? `: ${g.list.map((st) => `${st.stat === "Attack" ? "Ataque" : st.stat} ${st.delta > 0 ? "+" : ""}${st.delta}`).join(", ")}` : ""}${g.notes.length ? ` (${g.notes.join(", ")})` : ""}`);
+      }
       else notes.push(`${e.name} resistiu (SAB ${total} vs CD ${dc})`);
     }
   }
@@ -313,13 +328,75 @@ export async function entryAbilities(rules, item) {
       notes.push(`Hospitality: ${o.name} +${heal} HP`);
     }
   }
-  const field = { Drizzle: "chuva (Rain Dance)", Drought: "sol forte (Sunny Day)", "Sand Stream": "tempestade de areia", "Snow Warning": "granizo/neve",
-    "Electric Surge": "Electric Terrain", "Grassy Surge": "Grassy Terrain", "Misty Surge": "Misty Terrain", "Psychic Surge": "Psychic Terrain",
-    "Hadron Engine": "Electric Terrain", "Orichalcum Pulse": "sol forte" };
-  for (const [k, v] of Object.entries(field)) if (ab.includes(k)) notes.push(`${k}: ${v} (aplique o clima/terreno)`);
-  for (const k of ["Download", "Trace", "Imposter", "Costar", "Curious Medicine", "Moody", "Anticipation", "Forewarn", "Screen Cleaner"]) {
-    if (ab.includes(k)) notes.push(`${k}: confira o efeito ao entrar`);
+  // weather and terrain on entering (field.js)
+  for (const [k, spec] of Object.entries(FIELD_ABILITIES)) if (ab.includes(k)) { const n = await startField({ ...spec, rounds: 5 }, { by: item.name }); if (n) notes.push(`${k}: ${n}`); }
+  // Download: Ataque Especial +1 if the enemy's FOR+CON is higher than DES+SAB, otherwise Ataque +1
+  if (ab.includes("Download") && enemies.length) {
+    const e = (await near(enemies, 999))[0] ?? enemies[0];
+    const a = rules.attributes(getSheet(e).pkmn);
+    const stat = mod(a.STR) + mod(a.CON) > mod(a.DEX) + mod(a.WIS) ? "SpecialAttack" : "Attack";
+    await updateSheet(item.id, (x) => addStage(x.pkmn, stat, 1));
+    notes.push(`Download (analisou ${e.name}): ${stat === "Attack" ? "Ataque" : "Ataque Especial"} +1`);
   }
+  // Moody: one stat +2 and another −1, at random
+  if (ab.includes("Moody")) {
+    const pool = ["Attack", "SpecialAttack", "Defense", "SpecialDefense", "Speed"];
+    const up = pool[d(5) - 1];
+    const rest = pool.filter((x) => x !== up);
+    const down = rest[d(4) - 1];
+    await updateSheet(item.id, (x) => { addStage(x.pkmn, up, 2); addStage(x.pkmn, down, -1); });
+    notes.push(`Moody: ${up} +2, ${down} −1`);
+  }
+  // Trace: copies a random enemy's ability (some can't be copied)
+  if (ab.includes("Trace") && enemies.length) {
+    const NO = ["As One", "Battle Bond", "Comatose", "Commander", "Disguise", "Embody Aspect", "Flower Gift", "Forecast", "Gulp Missile", "Hunger Switch", "Ice Face",
+      "Illusion", "Imposter", "Multitype", "Neutralizing Gas", "Poison Puppeteer", "Power Construct", "Power of Alchemy", "Protosynthesis", "Quark Drive", "Receiver",
+      "RKS System", "Schooling", "Shields Down", "Stance Change", "Tera Shell", "Tera Shift", "Trace", "Zen Mode", "Zero to Hero"];
+    const pool = enemies.map((e) => ({ e, a: rules.abilities(getSheet(e).pkmn).find((x) => !NO.includes(x)) })).filter((x) => x.a);
+    if (pool.length) {
+      const pick = pool[d(pool.length) - 1];
+      await updateSheet(item.id, (x) => { x.battle.ability = pick.a; });
+      notes.push(`Trace: copiou ${pick.a} de ${pick.e.name}`);
+    }
+  }
+  // Costar: copies the stages of an ally within 15 m
+  if (ab.includes("Costar")) {
+    const f = (await near(friends, 15)).find((o) => Object.keys(getSheet(o).pkmn.stages ?? {}).length);
+    if (f) { const st = { ...getSheet(f).pkmn.stages }; await updateSheet(item.id, (x) => { x.pkmn.stages = st; }); notes.push(`Costar: copiou os estágios de ${f.name}`); }
+  }
+  // Screen Cleaner: every Reflect / Light Screen / Aurora Veil ends
+  if (ab.includes("Screen Cleaner")) {
+    for (const team of ["jogadores", "inimigos", "neutros"]) await clearSide(team, ["reflect", "lightScreen", "auroraVeil"]);
+    notes.push("Screen Cleaner: as telas acabaram");
+  }
+  // Supreme Overlord: fainted allies of its trainer (up to 5)
+  if (ab.includes("Supreme Overlord") && s.trainer) {
+    const down = (await party(s.trainer)).filter((p) => p.id !== item.id && getSheet(p).pkmn.hp.current <= 0).length;
+    if (down) { await updateSheet(item.id, (x) => { x.battle.overlord = Math.min(5, down); }); notes.push(`Supreme Overlord: ${Math.min(5, down)} aliado(s) desmaiado(s)`); }
+  }
+  // the ones that only reveal something: a note for the table
+  if (ab.includes("Anticipation")) {
+    const scary = [];
+    for (const e of enemies) {
+      const ep = getSheet(e).pkmn;
+      if (Object.keys(ep.moves ?? {}).some((n) => ["Fissure", "Horn Drill", "Guillotine", "Sheer Cold"].includes(n) || (rules.moveData(ep, n).damage && rules.effectiveness(rules.moves[n]?.Type, s.pkmn) > 1))) scary.push(e.name);
+    }
+    notes.push(`Anticipation: ${scary.length ? `estremeceu (${scary.join(", ")} tem Move perigoso)` : "nada perigoso"}`);
+  }
+  if (ab.includes("Forewarn") && enemies.length) {
+    const e = enemies[0];
+    const ep = getSheet(e).pkmn;
+    const best = Object.keys(ep.moves ?? {}).map((n) => ({ n, m: rules.moveData(ep, n).damage })).filter((x) => x.m)
+      .sort((a, b) => b.m.amount * b.m.dice - a.m.amount * a.m.dice)[0];
+    if (best) notes.push(`Forewarn: ${e.name} conhece ${best.n}`);
+  }
+  if (ab.includes("Frisk") && enemies.length) {
+    const e = enemies.find((o) => getSheet(o).pkmn.item);
+    notes.push(`Frisk: ${e ? `${e.name} segura ${getSheet(e).pkmn.item}` : "ninguém segura item"}`);
+  }
+  for (const k of ["Imposter", "Curious Medicine", "Illusion"]) if (ab.includes(k)) notes.push(`${k}: confira o efeito ao entrar`);
+  // Speed Boost doesn't work on the turn it comes in
+  await updateSheet(item.id, (x) => { x.battle.justIn = true; });
   if (notes.length) await pushLog({ kind: "note", attacker: item.name, text: `entrou em campo — ${notes.join("; ")}` });
 }
 

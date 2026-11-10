@@ -4,21 +4,25 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.6";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.6";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.6";
-import { getRoller } from "./dice.js?v=0.9.6";
-import { defenses, endure } from "./protect.js?v=0.9.6";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.6";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.7";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.7";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.7";
+import { getRoller } from "./dice.js?v=0.9.7";
+import { defenses, endure } from "./protect.js?v=0.9.7";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch } from "./trainer.js?v=0.9.7";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.6";
+} from "./battle.js?v=0.9.7";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.6";
+} from "./tactics.js?v=0.9.7";
+
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.7";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.7";
+import * as MFX from "./movefx.js?v=0.9.7";
 
 export { TurnError };
 
@@ -62,8 +66,51 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const sp = special(rules, moveName);
   const charging = chargingOf(aSheet);
   const releasing = !!(charging && charging.move === moveName);
+
+  // the field (weather, terrain, screens), the abilities around and this move's special rules
+  const mfx = MFX.special(moveName, raw);
+  // healing moves: their dice heal (movefx), they don't deal damage
+  if (mfx.heal && !raw.atk && !raw.Save) move.damage = null;
+  const field = await fieldNow();
+  const round = field.round;
+  const onField = await OBR.scene.items.getItems((i) => i.id !== attackerItem.id && getSheet(i) && !getSheet(i).ball && getSheet(i).pkmn.hp.current > 0);
+  const gas = [aSheet, ...onField.map(getSheet)].some((s) => abilitiesOf(rules, s).includes("Neutralizing Gas"));
+  const others = [];
+  for (const o of onField) others.push({ item: o, sheet: getSheet(o), dist: await distanceMeters(attackerItem, o), ally: allies(aSheet, getSheet(o)) });
+  const aAbil = abilitiesOf(rules, aSheet, { gas });
+  const aGrounded = grounded(aSheet, aAbil);
+  if (!opts.force) {
+    const damp = [{ sheet: aSheet, dist: 0, item: attackerItem }, ...others].find((o) => o.dist <= 15.05 && abilitiesOf(rules, o.sheet, { gas }).includes("Damp"));
+    const why = MFX.restricted(rules, aSheet, moveName, raw, { damp: damp?.item.name });
+    if (why) throw new TurnError(why);
+  }
+  if (mfx.clearTerrain === "before" && !field.terrain && !opts.force) throw new Error(`${move.label} só funciona dentro de um terreno.`);
+  if (FIELD_MOVES[moveName]?.needs && !FIELD_MOVES[moveName].needs.includes(field.weather) && !opts.force) throw new Error(`${move.label} só pode ser usado com granizo ou neve.`);
+  // this use's type (Hidden Power, Weather Ball, Terrain Pulse; Normalize, Pixilate, Liquid Voice...)
+  let isLast = false;
+  if (aAbil.includes("Analytic") && running) {
+    const order = Object.values((await OBR.scene.getMetadata())["com.pretty-initiative/order"] ?? {});
+    isLast = order[order.length - 1] === attackerItem.id;
+  }
+  const newType = MFX.typeFor(mfx, move, { field, grounded: aGrounded });
+  const aMods = attackMods(rules, aSheet, { ...move, type: newType ?? move.type }, raw,
+    { field, melee, stab: move.stab > 0, isLast, others, fx, prof: rules.proficiency(attacker), gas });
+  if (newType || aMods.type) {
+    const nt = aMods.type ?? newType;
+    // STAB follows the new type
+    const stab = rules.types(attacker).includes(nt) ? rules.stabBonus(attacker) : 0;
+    if (move.damage) move.damage = { ...move.damage, bonus: move.damage.bonus - (move.stab ?? 0) + stab };
+    move.stab = stab;
+    move.type = nt;
+    entry.type = TYPE_PT[nt] ?? nt;
+    if (newType) entry.notes.push(`tipo ${TYPE_PT[nt] ?? nt}`);
+  }
+  entry.notes.push(...aMods.notes);
+  const uDice = MFX.userDice(rules, aSheet, move, mfx, { field, type: move.type, grounded: aGrounded });
+  entry.notes.push(...uDice.notes);
   // two-turn moves: this use only charges / vanishes / focuses (no targets, no roll)
-  const activating = !!sp && ["invuln", "focus", "charge"].includes(sp.kind) && !releasing;
+  // (Solar Beam / Solar Blade under strong sunlight go right away)
+  const activating = !!sp && ["invuln", "focus", "charge"].includes(sp.kind) && !releasing && !(mfx.solar && field.weather === "sun");
   if (invulnOf(aSheet) && !releasing) throw new TurnError(`${who} está ${invulnText(charging)}: só pode usar ${charging.move}.`);
   if (releasing && !releaseReady(aSheet, running)) throw new TurnError(`${charging.move} só pode ser liberado no próximo turno.`);
   if (moveName === "Fake Out" && running && !opts.force) {
@@ -133,9 +180,14 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     cost = { spend: ["bonus"], label: "ação bônus (Investida Poderosa)", powerCharge: true };
     entry.cost = cost.label;
   } else {
-    cost = opts.force ? null : chooseCost(attackerItem, raw, running);
+    cost = opts.force ? null : chooseCost(attackerItem, raw, running, rules);
     if (cost && sp?.kind === "recharge") { cost.recharge = true; cost.label += ", recarga no próximo turno"; }
     if (cost) entry.cost = cost.label;
+  }
+  // Dazzling / Queenly Majesty: enemies within 15 m can't use bonus actions or reactions for Moves
+  if (cost && (cost.spend.includes("bonus") || cost.spend.includes("reaction")) && !opts.force) {
+    const queen = others.find((o) => !o.ally && o.dist <= 15.05 && ["Dazzling", "Queenly Majesty"].some((a) => abilitiesOf(rules, o.sheet, { gas }).includes(a)));
+    if (queen) throw new TurnError(`${queen.item.name} (${abilitiesOf(rules, queen.sheet, { gas }).find((a) => ["Dazzling", "Queenly Majesty"].includes(a))}): não dá pra usar Moves com ação bônus ou reação perto dele.`);
   }
 
   const roller = await getRoller({ useDicePlus: settings.dicePlus, showResults: settings.dicePlusPopup });
@@ -212,7 +264,9 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   // Protect, Wide Guard, Quick Guard, Crafty Shield, Upper Hand (protect.js): protections already up
   // block right away; who can still react is asked (5 s). A blocked target gets no rolls at all.
-  if (!opts.defense && running && targetItems.length) {
+  // (Unseen Fist: its melee moves go through them)
+  if (aMods.unseenFist && targetItems.length) entry.notes.push("Unseen Fist: ignora proteções");
+  if (!opts.defense && running && targetItems.length && !aMods.unseenFist) {
     const guard = await defenses(rules, { attackerItem, move, raw, targets: targetItems, area: !!opts.area });
     entry.notes.push(...guard.notes);
     for (const b of guard.blocked) entry.results.push({ target: null, note: b.note });
@@ -243,12 +297,15 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (helped) entry.notes.push(`Helping Hand de ${[...helpers.map((hh) => hh.name), ...(pendingHelp ? [pendingHelp.by] : [])].join(", ")}`);
 
   // modifiers from the attacker's stages
-  const acc = stage(attacker, "Accuracy");
+  // (+ abilities: Compound Eyes, Hustle, Victory Star, Super Luck; weather: Thunder in the sun)
+  const acc = stage(attacker, "Accuracy") + aMods.acc + uDice.accDelta;
   const critMargin = 3 * stage(attacker, "CritMargin");
-  const critAt = Math.max(2, 20 - critMargin);
-  const atkStageKey = melee ? "Attack" : "SpecialAttack";
-  const burned = !!conditionsOf(aSheet).Burning;
-  let dc = move.saveDC != null ? move.saveDC + acc : null;
+  const critAt = Math.max(2, 20 - critMargin - aMods.crit);
+  // Body Press uses the Defense stages; Foul Play the target's Attack (below)
+  const atkStageKey = mfx.atkFrom ?? (melee ? "Attack" : "SpecialAttack");
+  // Queimado halves melee damage (not with Guts, nor Facade)
+  const burned = !!conditionsOf(aSheet).Burning && !aMods.guts && moveName !== "Facade";
+  let dc = move.saveDC != null ? move.saveDC + stage(attacker, "Accuracy") + aMods.dc : null;
 
   // 2) every die of the move in ONE throw
   const dmg = move.damage;
@@ -267,19 +324,34 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const beast = melee && hasDice && rules.hasFeat(attacker, "Atacante Bestial") && !(tracked && aSheet.battle?.move?.beast);
   if (beast) entry.notes.push("Atacante Bestial: dano rolado 2x, fica o maior");
   // { amount, flat, reroll (1 keep higher / -1 keep lower), halvings } for these points
-  const dmgSpec = (a, rd) => {
+  // m: dice changes from abilities, weather/terrain and the move itself (movefx/abilities):
+  //   mult/add (dice count), double, halfMore (+½ the dice; 1 die: roll twice keep higher),
+  //   halve (½ the dice; 1 die: roll twice keep lower), groups (+1 die per 2), keepHigh/keepLow, flat
+  const dmgSpec = (a, rd, m = {}) => {
     const pts = pointsSummary(a, rd);
-    const amped = hasDice ? amplifyDice(dmg.amount, dmg.dice, pts.ampGroups) : { amount: 0, bonus: 0 };
-    const keepHigh = pts.ampReroll || helpOneDie || beast;
+    let base = hasDice ? dmg.amount * (m.mult ?? 1) + (m.add ?? 0) : 0;
+    if (m.double) base *= 2;
+    if (m.halfMore) base += Math.floor(base / 2);
+    if (m.halve) base = Math.floor(base / 2);
+    base = hasDice ? Math.max(1, base) : 0;
+    const one = hasDice && dmg.amount === 1;
+    const amped = hasDice ? amplifyDice(base, dmg.dice, pts.ampGroups + (m.groups ?? 0)) : { amount: 0, bonus: 0 };
+    const keepHigh = pts.ampReroll || helpOneDie || beast || !!m.keepHigh || (!!m.halfMore && one);
+    const keepLow = pts.redReroll || !!m.keepLow || (!!m.halve && one);
     return {
       a, rd,
       amount: amped.amount + helpExtra + ownBoost,
-      flat: amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0),
-      reroll: keepHigh && !pts.redReroll ? 1 : pts.redReroll && !keepHigh ? -1 : 0,
+      flat: amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0) + (m.flat ?? 0),
+      reroll: keepHigh && !keepLow ? 1 : keepLow && !keepHigh ? -1 : 0,
       halvings: pts.redHalvings,
     };
   };
-  const baseSpec = dmgSpec(amp, red);
+  // what doesn't depend on the target
+  const uMods = {
+    mult: uDice.mult, add: uDice.add, double: aMods.double || uDice.double, halfMore: aMods.halfMore || uDice.halfMore,
+    halve: uDice.halve, groups: aMods.groups + (uDice.groups ?? 0), keepHigh: aMods.keepHigh || uDice.keepHigh, keepLow: aMods.keepLow, flat: aMods.flat,
+  };
+  const baseSpec = dmgSpec(amp, red, uMods);
   const dmgAmount = baseSpec.amount;
   if (amp || red) entry.notes.push(`pontos de dano: ${pointsText(amp, red, dmg?.amount || 1, dmg?.dice || 8) || "—"}`);
   if (helpExtra) entry.notes.push(`Helping Hand: +${helpExtra}d${dmg.dice} de dano`);
@@ -328,31 +400,60 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
 
   // several strikes (Double Kick, Dual Wingbeat, Triple Dive...): one attack roll each; with more
   // than one target chosen, the strikes go round them in order
-  const nHits = move.hits > 1 && !opts.area && targetItems.length ? move.hits : 1;
-  if (nHits > 1 && targetItems.length > nHits) throw new Error(`${move.label}: são ${nHits} golpes, escolha até ${nHits} alvos.`);
-  const seq = nHits > 1 ? Array.from({ length: nHits }, (_, i) => ({ t: targetItems[i % targetItems.length], strike: i })) : targetItems.map((t) => ({ t, strike: 0 }));
-  if (nHits > 1) entry.notes.push(`${nHits} golpes${move.firstOnlyBonus ? " (bônus de MOVE só no 1º)" : ""}`);
+  // Fury Attack, Bullet Seed, Rock Blast...: after a hit, a d8 says how many more strikes (sure-hit,
+  // MOVE bonus only on the first). The 4 possible extra strikes are rolled now; the unused ones are dropped.
+  const multi = mfx.multiTable && !opts.area && targetItems.length && move.attackBonus != null;
+  const nHits = multi ? 5 : move.hits > 1 && !opts.area && targetItems.length ? move.hits : 1;
+  if (!multi && nHits > 1 && targetItems.length > nHits) throw new Error(`${move.label}: são ${nHits} golpes, escolha até ${nHits} alvos.`);
+  const seq = multi ? Array.from({ length: 5 }, (_, i) => ({ t: targetItems[0], strike: i }))
+    : nHits > 1 ? Array.from({ length: nHits }, (_, i) => ({ t: targetItems[i % targetItems.length], strike: i })) : targetItems.map((t) => ({ t, strike: 0 }));
+  if (nHits > 1 && !multi) entry.notes.push(`${nHits} golpes${move.firstOnlyBonus ? " (bônus de MOVE só no 1º)" : ""}`);
+  const multiDie = multi ? want({ amount: 1, sides: moveName === "Population Bomb" ? 20 : 8, bonus: 0 }) : null;
+  const skillLink = aAbil.includes("Skill Link");
   // sure-hit moves (Swift, Aerial Ace): a d20 per target only for the critical
   if (move.sureHit && targetItems.length) entry.notes.push("acerto garantido (o d20 só decide o crítico)");
+  // Supercell Slam / Jump Kick: a miss hurts the user; Fusion Bolt/Flare is remembered for the other
+  const priority = Number(/Prioridade\s*(-?\d)/i.exec(raw.Description ?? "")?.[1] ?? 0);
+  // distances from each target to the others (Friend Guard, Armor Tail, the Ruin abilities)
+  const distTo = new Map();
+  for (const t of new Set(seq.map((x) => x.t))) {
+    const m = new Map();
+    for (const o of others) m.set(o.item.id, o.item.id === t.id ? 0 : await distanceMeters(t, o.item));
+    distTo.set(t.id, m);
+  }
 
-  const plans = seq.map(({ t, strike }) => {
+  let plans = seq.map(({ t, strike }) => {
     const tSheet = getSheet(t);
     const target = tSheet?.pkmn;
     const far = farFromFlier.has(t.id);
+    // the target's abilities against this move, and the dice that depend on the target
+    const tCtx = { field, melee, type: move.type, moldBreaker: aMods.moldBreaker, gas, ally: tSheet ? allies(aSheet, tSheet) : false,
+      eff: target ? rules.effectiveness(move.type, target) : 1, priority,
+      others: [{ item: attackerItem, sheet: aSheet, dist: 0, ally: true }, ...others].map((o) => ({ ...o, allyOfTarget: tSheet ? allies(o.sheet, tSheet) && o.item.id !== t.id : false,
+        distToTarget: o.item.id === attackerItem.id ? (others.find((x) => x.item.id === t.id)?.dist ?? 0) : distTo.get(t.id)?.get(o.item.id) ?? 99 })) };
+    const tm = targetMods(rules, aSheet, tSheet, move, raw, tCtx);
+    const td = MFX.targetDice(rules, aSheet, tSheet, attackerItem, t, move, mfx, { field, others });
+    const extraStrike = multi && strike > 0;
+    const sureNow = extraStrike || move.sureHit || aMods.noGuard || tm.sure || uDice.sure || td.sure;
     const saveAdv = Math.max(-1, Math.min(1, (tSheet && move.save ? saveAdvantage(tSheet, move.save) : 0) + (far ? 1 : 0)));
-    const saveMod = move.saveDC != null && target ? (rules.saves(target)[move.save] ?? 0) + stage(target, "Evasion") : null;
+    const saveMod = move.saveDC != null && target ? (rules.saves(target)[move.save] ?? 0) + stage(target, "Evasion") + tm.saveBonus : null;
     const adv = move.attackBonus != null && tSheet ? Math.max(-1, Math.min(1,
       attackAdvantage(aSheet, tSheet, attackerItem.id) + (diving ? 1 : 0) - (far ? 1 : 0) - (engaged ? 1 : 0)
       + (opts.opportunity && rules.hasFeat(attacker, "Mestre de Combate Corpo a Corpo") ? 1 : 0))) : 0;
     const inv = invulnCheck(tSheet, moveName);
     const contestMod = fx.contest && target ? mod(rules.attributes(target)[fx.contest.attr] ?? 10) : null;
     // damage this target receives: its own "dano recebido" points join the attacker's
-    const inA = tSheet?.battle?.ampIn ?? 0, inR = tSheet?.battle?.redIn ?? 0;
-    const spec0 = inA || inR ? dmgSpec(amp + inA, red + inR) : baseSpec;
+    const inA = tSheet?.battle?.ampIn ?? 0, inR = (tSheet?.battle?.redIn ?? 0) + tm.redPoints;
+    const tMods = { ...uMods, double: uMods.double || td.double, add: uMods.add + td.add, groups: uMods.groups + (td.groups ?? 0),
+      keepHigh: uMods.keepHigh || tm.keepHigh, keepLow: uMods.keepLow || tm.keepLow };
+    const spec0 = dmgSpec(amp + inA, red + inR, tMods);
     // Triple Axel: the 2nd strike rolls twice the dice, the 3rd three times; the MOVE bonus only on the 1st
-    const spec = nHits > 1 ? { ...spec0, amount: spec0.amount * (move.scaleDice ? strike + 1 : 1), cut: move.firstOnlyBonus && strike > 0 ? (dmg?.moveMod ?? 0) : 0 } : spec0;
+    // (Fury Attack & co.: the extra strikes roll the base dice, without MOVE)
+    const cutMove = (move.firstOnlyBonus || multi) && strike > 0 ? (dmg?.moveMod ?? 0) : 0;
+    const spec = nHits > 1 ? { ...spec0, amount: spec0.amount * (move.scaleDice ? strike + 1 : 1), cut: cutMove } : spec0;
+    for (const n of [...tm.notes, ...td.notes]) if (!entry.notes.includes(n)) entry.notes.push(`${t.name}: ${n}`);
     return {
-      t, tSheet, target, saveMod, adv, saveAdv, inv, spec, strike,
+      t, tSheet, target, saveMod, adv, saveAdv, inv, spec, strike, tm, sureNow, extraStrike,
       dmg2: inv?.double && hasDice ? Array.from({ length: dmg.times }, () => want({ amount: spec.amount, sides: dmg.dice, bonus: 0 })) : null,
       // Punishment: +1 die per positive stage of the target (max 7)
       boost: fx.dicePerTargetBoost && hasDice && target ? (() => {
@@ -361,13 +462,14 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       })() : null,
       // team/owner travel with the result so each viewer can hide what they shouldn't see
       r: { targetId: t.id, target: `${t.name || (target ? rules.name(target) : "Alvo")}${nHits > 1 ? ` (${strike + 1}º golpe)` : ""}`, effects: [], team: tSheet ? teamOf(tSheet) : null, owner: tSheet?.owner ?? null },
-      atk: move.attackBonus != null ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
-      sure: move.sureHit && move.attackBonus == null ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
+      atk: move.attackBonus != null && !extraStrike ? want({ amount: adv ? 2 : 1, sides: 20, bonus: move.attackBonus }) : null,
+      sure: (move.sureHit && move.attackBonus == null) || extraStrike ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
       // the waiting die was already rolled; chips roll theirs in this throw
       help: helpSides && !pendingHelp?.die && move.attackBonus != null ? want({ amount: 1, sides: helpSides, bonus: 0 }) : null,
       helpFixed: move.attackBonus != null ? Math.max(pendingHelp?.die ?? 0, 0) : 0,
       sav: saveMod != null ? want({ amount: saveAdv ? 2 : 1, sides: 20, bonus: saveMod }) : null,
-      con: fx.contest && (fx.contest.status || fx.contest.stages.length) ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
+      // (Taunt, Encore, Disable, Curse, Memento: the contest decides the move's own effect)
+      con: fx.contest && (fx.contest.status || fx.contest.stages.length || mfx.restrict || mfx.curse || mfx.selfKOOnSuccess) ? want({ amount: 1, sides: 20, bonus: 0 }) : null,
       contestMod,
       // (an area rolls once for everyone with the attacker's dice; the target's points then only halve)
       dmg: hasDice && !opts.area ? dmgParts(spec) : null,
@@ -404,10 +506,11 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // one help die at a time: the rolled one or the one waiting (the bigger)
       const bonus = Math.max(p.help != null ? dice(p.help)[0] : 0, p.helpFixed);
       const total = n + move.attackBonus + acc + bonus + releasePenalty - (power ? 5 : 0);
-      const ac = target ? rules.ac(target) + stage(target, "Evasion") : null;
+      const ac = target ? rules.ac(target) + stage(target, "Evasion") + p.tm.acBonus : null;
       p.crit = n >= critAt;
-      const hit = n !== 1 && (p.crit || ac == null || total >= ac);
-      r.attack = { nat: n, total, ac, crit: p.crit, hit, fumble: n === 1, adv: p.adv > 0, help: bonus || null };
+      // acerto garantido (No Guard, Minimize, Thunder in the rain...): the d20 only for the crit
+      const hit = p.sureNow || (n !== 1 && (p.crit || ac == null || total >= ac));
+      r.attack = { nat: n, total, ac, crit: p.crit, hit, fumble: !p.sureNow && n === 1, adv: p.adv > 0, help: bonus || null, ...(p.sureNow ? { sure: true } : {}) };
       if (!hit) p.hitFactor = 0;
     } else if (p.sure != null) {
       // acerto garantido: always hits, even on a natural 1; the d20 only for the critical
@@ -415,6 +518,10 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       p.crit = n >= critAt;
       r.attack = { nat: n, total: null, ac: null, crit: p.crit, hit: true, fumble: false, adv: false, help: null, sure: true };
     }
+    // Merciless: a hit on a poisoned target is a critical hit
+    if (p.tm.mercy && r.attack?.hit && !p.crit) { p.crit = true; r.attack.crit = true; r.effects.push("crítico (Merciless: alvo envenenado)"); }
+    // the target's abilities: Levitate, Volt Absorb, Bulletproof, Soundproof, Telepathy, Magic Bounce...
+    if (p.tm.immune && !p.tm.bounce) { p.hitFactor = 0; p.immune = true; r.effects.push(`imune (${p.tm.immune})`); }
     if (dc != null && (p.atk == null || r.attack.hit)) {
       const attr = ATTR_PT[move.save] ?? move.save;
       const effectOnly = p.atk != null; // attack + save (e.g. Acid Spray): the save is for the secondary effect
@@ -424,10 +531,12 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         // a Helping Hand die waiting on the target also goes into its save
         const hb = p.tSheet?.battle?.helped?.die ?? 0;
         if (hb) change(p.t.id).clearHelp = true;
-        const success = n === 20 || (n !== 1 && n + p.saveMod + hb >= dc);
+        // No Guard (either side) / Blizzard in hail: damaging save moves always do full damage
+        const forceFail = !effectOnly && move.damage && (aMods.noGuard || p.tm.sure || (mfx.hailSure && field.weather === "hail"));
+        const success = !forceFail && (n === 20 || (n !== 1 && n + p.saveMod + hb >= dc));
         r.save = { attr, nat: n, total: n + p.saveMod + hb, dc, success, effectOnly, dis: p.saveAdv < 0, help: hb || null };
-        if (!effectOnly) {
-          if (n === 20) p.hitFactor = 0;
+        if (!effectOnly && !p.immune) {
+          if (n === 20 && !forceFail) p.hitFactor = 0;
           else if (success) p.hitFactor = 0.5;
           if (n === 1) p.crit = true;
         }
@@ -444,9 +553,37 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     entry.results.push(r);
   }
 
+  // Fury Attack & co.: how many extra strikes (only after the first one hits); Triple Kick: stops at a miss
+  if (multi) {
+    const first = plans[0];
+    const n = dice(multiDie)[0];
+    const extra = first.r.attack?.hit ? (skillLink ? 4 : MFX.extraStrikes(moveName === "Population Bomb" ? Math.ceil((n * 8) / 20) : n, false)) : 0;
+    if (first.r.attack?.hit) entry.notes.push(skillLink ? "Skill Link: 4 golpes extras" : `d${moveName === "Population Bomb" ? 20 : 8} = ${n}: ${extra} golpe(s) extra(s)`);
+    const drop = plans.filter((p) => p.strike > extra);
+    plans = plans.filter((p) => p.strike <= extra);
+    for (const p of drop) entry.results.splice(entry.results.indexOf(p.r), 1);
+    plans.forEach((p) => { p.r.target = `${p.t.name}${extra ? ` (${p.strike + 1}º golpe)` : ""}`; });
+  } else if (move.stopOnMiss && nHits > 1) {
+    const missAt = plans.findIndex((p) => p.r.attack && !p.r.attack.hit);
+    if (missAt >= 0) {
+      const drop = plans.slice(missAt + 1);
+      plans = plans.slice(0, missAt + 1);
+      for (const p of drop) entry.results.splice(entry.results.indexOf(p.r), 1);
+      if (drop.length) entry.notes.push("errou: os golpes seguintes não acontecem");
+    }
+  }
+  anyHit = plans.some((p) => p.hitFactor > 0 && (p.atk == null || p.r.attack?.hit));
+
   // critical hits roll only their extra dice, in a second (small) throw
-  const crits = plans.filter((p) => p.crit && p.dmg && p.hitFactor > 0);
-  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.map(() => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0 }))), `${moveName_} CRÍTICO`) : [];
+  // (Battle Armor / Shell Armor: no extra dice; Sniper: twice the extra dice; Fickle Beam 15+: doubled dice too)
+  const sniper = aAbil.includes("Sniper");
+  for (const p of plans) {
+    const fickle = mfx.fickle && (p.r.attack?.nat ?? 0) >= 15 && p.r.attack?.hit;
+    p.extraSets = (p.crit && !p.tm.noCritExtra ? (sniper ? 2 : 1) : 0) + (fickle ? (p.crit ? 2 : 1) : 0);
+    if (fickle) p.r.effects.push("Fickle Beam: dados dobrados");
+  }
+  const crits = plans.filter((p) => p.extraSets > 0 && p.dmg && p.hitFactor > 0);
+  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.flatMap(() => Array.from({ length: p.extraSets }, () => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0 })))), `${moveName_} CRÍTICO`) : [];
 
   // 4) damage: stages, burn, type, defense
   if (dmg) {
@@ -466,12 +603,15 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         roll = { dice: roll.dice.map((d0, i) => [...d0, ...(extra[i] ?? [])]), total: roll.total + extra.flat().reduce((a, b) => a + b, 0) };
         p.r.effects.push(`dados de dano dobrados (${p.inv.move})`);
       }
-      if (p.crit && p.dmg) {
-        const extra = p.dmg.map(() => critRolls[c++].dice);
+      if (p.extraSets > 0 && p.dmg) {
+        const extra = p.dmg.map(() => Array.from({ length: p.extraSets }, () => critRolls[c++].dice).flat());
         roll = { dice: roll.dice.map((d0, i) => [...d0, ...extra[i]]), total: roll.total + extra.flat().reduce((a, b) => a + b, 0) };
       }
       // Ataque/Ataque Especial: + stage x proficiency (a crit ignores the attacker's negative stages)
-      let atkStage = stage(attacker, atkStageKey);
+      // (Foul Play: the target's Attack; Unaware on the target: the attacker's stages don't count)
+      const tAbil = p.tSheet ? abilitiesOf(rules, p.tSheet, { gas }) : [];
+      let atkStage = mfx.foul && p.target ? stage(p.target, "Attack") : stage(attacker, atkStageKey);
+      if (tAbil.includes("Unaware") && !aMods.moldBreaker) atkStage = 0;
       if (p.crit && atkStage < 0) atkStage = 0;
       // Mestre de Combate: +10 once (on a save move, only when the target failed); Investida Poderosa +5
       const featDmg = (power && (move.attackBonus != null || p.hitFactor === 1) ? 10 : 0) + chargeBonus;
@@ -479,40 +619,132 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (burned && melee) total = Math.floor(total / 2); // Queimado: melee damage halved
       // "Ordem da entrada de dano" (pág. 55): ... 8. Defesa/Defesa Especial do alvo,
       // 9. vulnerabilidades e resistências por último
-      const eff = p.target ? rules.effectiveness(move.type, p.target) : 1;
+      let eff = p.target ? rules.effectiveness(move.type, p.target) : 1;
+      // Scrappy: Normal/Fighting hit Ghosts (the Ghost part counts as neutral)
+      if (eff === 0 && aMods.scrappy && p.target) eff = rules.typeMult(move.type, rules.types(p.target).filter((t0) => t0 !== "Ghost"));
+      if (aMods.ignoreResist && eff > 0 && eff < 1) eff = 1; // Tinted Lens
+      if (p.tm.effAdj) eff = p.tm.effAdj(eff); // Filter / Solid Rock / Prism Armor
       let final = Math.max(0, total);
       if (p.target) {
-        let defStage = stage(p.target, melee ? "Defense" : "SpecialDefense");
+        // Psyshock: the target's Defense even though it's ranged; Unaware (attacker): its stages don't count
+        let defStage = stage(p.target, mfx.defAs ?? (melee ? "Defense" : "SpecialDefense"));
+        if (aAbil.includes("Unaware")) defStage = 0;
         if (p.crit && defStage > 0) defStage = 0; // a crit ignores the defender's positive stages
         final = Math.max(0, final - defStage * rules.proficiency(p.target));
       }
       final = Math.floor(final * eff);
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
-      // Redução: each 2 points halve the final damage (rounded down each time)
+      // abilities and field after the type: Thick Fat, Fur Coat, Fluffy...; Defeatist; Solar Beam in the rain
+      final = Math.floor(final * p.tm.mult * uDice.finalMult * (aMods.halveFinal ? 0.5 : 1));
+      // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores)
+      const side = p.tSheet && field.sides?.[teamOf(p.tSheet)];
+      if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)
+        && ((melee && side.reflect) || (!melee && side.lightScreen) || side.auroraVeil)) {
+        final = Math.floor(final / 2);
+        p.r.effects.push(`${side.auroraVeil ? "Aurora Veil" : melee ? "Reflect" : "Light Screen"}: dano pela metade`);
+      }
+      if (p.tm.red) final = Math.max(0, final - p.tm.red);
       // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
-      const halvings = p.dmg ? p.spec.halvings : pointsSummary(0, red + (p.tSheet?.battle?.redIn ?? 0)).redHalvings;
+      const halvings = p.dmg ? p.spec.halvings : pointsSummary(0, red + (p.tSheet?.battle?.redIn ?? 0) + p.tm.redPoints).redHalvings;
       for (let i = 0; i < halvings; i++) final = Math.floor(final / 2);
+      // Multiscale / Shadow Shield (full HP: the first hit halved), Sturdy (full HP: a big hit halved, never
+      // from full to 0), Disguise / Ice Face (the first hit does nothing)
+      if (p.target) {
+        const chPrev = changes.get(p.t.id)?.damage ?? 0;
+        const max = rules.maxHP(p.target);
+        if (p.tm.firstHalf && !chPrev && final > 0) { final = Math.floor(final / 2); p.r.effects.push("Multiscale: metade do dano"); }
+        if (p.tm.sturdy && !chPrev && final > max / 2) {
+          final = Math.floor(final / 2);
+          if (final >= p.target.hp.current) final = p.target.hp.current - 1;
+          p.r.effects.push("Sturdy: aguentou");
+        }
+        if (p.tm.disguise && !changes.get(p.t.id)?.disguised && final > 0) {
+          change(p.t.id).disguised = p.tm.disguise;
+          p.r.effects.push(`${p.tm.disguise}: o disfarce absorveu o golpe`);
+          final = 0;
+        }
+      }
       p.r.damage = { dice: roll.dice, sides: dmg.dice, bonus: dmg.bonus + (p.dmg ? p.spec : baseSpec).flat - (p.spec.cut ?? 0) + atkStage * aProf + featDmg, rolled: total, eff, effLabel: effLabel(eff), final, half: p.hitFactor === 0.5, shared: !!opts.area, crit: p.crit };
       if (p.target && settings.autoDamage && final > 0) {
         const ch = change(p.t.id);
         ch.damage += final;
-        if (p.crit) ch.wake = true; // a critical hit wakes up / removes Sonolento
+        ch.hits = (ch.hits ?? 0) + 1;
+        if (p.crit) { ch.wake = true; ch.crit = true; } // a critical hit wakes up / removes Sonolento
         if (move.type === "Fire") ch.thaw = true; // fire damage thaws
       }
+    }
+  }
+  // fixed damage (Seismic Toss, Night Shade, Dragon Rage, Super Fang, Counter...): no dice, STAB,
+  // crit nor resistances, but nothing against a type immunity
+  if (mfx.fixed) {
+    for (const p of plans) {
+      if (!p.target || p.hitFactor === 0 || p.immune) continue;
+      const eff = rules.effectiveness(move.type, p.target);
+      const n = eff === 0 ? 0 : MFX.fixedDamage(rules, aSheet, p.tSheet, mfx, attackerItem, p.t) ?? 0;
+      p.r.damage = { dice: [], sides: 0, bonus: n, rolled: n, eff: eff === 0 ? 0 : 1, effLabel: eff === 0 ? "imune" : "dano fixo", final: n, fixed: true };
+      if (n > 0 && settings.autoDamage) { const ch = change(p.t.id); ch.damage += n; ch.hits = (ch.hits ?? 0) + 1; }
+      if (mfx.fixed === "counter" && !n) p.r.effects.push("falhou (o alvo não te acertou com esse tipo de ataque por último)");
+    }
+  }
+  // Endeavor / Final Gambit / Pain Split: decided by the target's save
+  for (const p of plans) {
+    if (!p.target || p.immune || !(mfx.endeavor || mfx.gamble || mfx.painSplit)) continue;
+    const failed = p.r.save && !p.r.save.unknown && !p.r.save.success;
+    if (!failed) { p.r.effects.push("passou no teste: não funcionou"); continue; }
+    const lvl = rules.level(attacker);
+    const ch = change(p.t.id);
+    if (mfx.endeavor) { const n = Math.min(5 * lvl, Math.max(0, p.target.hp.current - attacker.hp.current)); ch.damage += n; p.r.effects.push(`Endeavor: −${n} HP`); }
+    if (mfx.gamble) { ch.damage += attacker.hp.current; p.r.effects.push(`Final Gambit: −${attacker.hp.current} HP`); ch.gambleKO = true; }
+    if (mfx.painSplit) {
+      const avg = Math.floor((p.target.hp.current + attacker.hp.current) / 2);
+      const loss = Math.min(5 * lvl, Math.max(0, p.target.hp.current - avg));
+      ch.damage += loss; ch.heal = Math.max(0, avg - p.target.hp.current);
+      ch.painSplitSelf = avg;
+      p.r.effects.push(`Pain Split: os dois ficam com ${avg} HP`);
     }
   }
 
   // 5) effects from the move text
   const naturalSelf = [];
+  // Sheer Force: no secondary effects; Serene Grace: the natural thresholds twice as wide (19 -> 17)
+  const sec = !aMods.sheer;
+  const natMin = fx.natural ? fx.natural.min - (aMods.serene ? 21 - fx.natural.min : 0) : 99;
   for (const p of plans) {
     if (!p.target) continue;
+    // an ability made it immune: Volt Absorb heals, Flash Fire powers up, Sap Sipper raises Attack...
+    if (p.immune) { if (p.tm.absorb) change(p.t.id).absorb = { ...p.tm.absorb, label: p.tm.immune }; continue; }
     // immune to the type of a damaging move: no damage and no secondary effects (pág. 55)
-    if (dmg && rules.effectiveness(move.type, p.target) === 0) continue;
-    const ch = change(p.t.id);
+    const effNow = rules.effectiveness(move.type, p.target);
+    if (dmg && effNow === 0 && !aMods.scrappy) continue;
+    // Magic Bounce: a status move comes back to its user
+    const ch = p.tm.bounce ? change(attackerItem.id) : change(p.t.id);
+    if (p.tm.bounce) p.r.effects.push("Magic Bounce: devolvido");
     const hit = p.atk == null || p.r.attack.hit;
     const failed = p.r.save && !p.r.save.unknown && !p.r.save.success;
+    const landed = hit && p.hitFactor > 0;
+    if (landed || (p.r.contest?.success)) ch.from = attackerItem.id;
+    // the move's own effects on this target (movefx.js)
+    if (landed && mfx.seed && !rules.types(p.target).includes("Grass")) ch.seed = { by: attackerItem.id, team: teamOf(aSheet) };
+    if (landed && mfx.seed && rules.types(p.target).includes("Grass")) p.r.effects.push("tipo Grama: imune a Leech Seed");
+    if (mfx.yawn && landed && !move.save) ch.yawn = 2;
+    if (mfx.clearTarget && landed) ch.clearStages = true;
+    if (mfx.knockOff && landed && p.target.item && !p.tSheet.battle?.itemLost) ch.knockOff = true;
+    if (mfx.breakScreens && landed) ch.breakScreens = true;
+    if (mfx.clearTerrain === "hit" && landed && field.terrain) ch.clearTerrain = true;
+    if (moveName === "Smelling Salts" && landed) ch.cure = ["Paralyzed"];
+    if (moveName === "Wake-Up Slap" && landed) ch.cure = ["Asleep", "Drowsy"];
+    if (mfx.leaveOne) ch.leaveOne = true;
+    if (mfx.restrict && (p.r.contest?.success || (!fx.contest && landed))) {
+      ch.restrict = { kind: mfx.restrict, move: p.tSheet.battle?.lastMove ?? null, turns: mfx.restrict === "disable" ? 4 : 3 };
+    }
+    if (mfx.curse && rules.types(attacker).includes("Ghost") && p.r.contest?.success) {
+      if (rules.level(p.target) > rules.level(attacker)) p.r.effects.push("Curse falhou (nível do alvo maior)");
+      else ch.curse = true;
+    }
+    if (mfx.heal && !mfx.heal.self && landed && allies(aSheet, p.tSheet)) ch.healDice = mfx.heal;
+    if (!sec) continue;
     // natural result on the attack roll ("mesmo que o golpe erre": Charge Beam)
-    if (fx.natural && p.r.attack && (p.r.attack.hit || fx.natural.evenMiss) && p.r.attack.nat >= fx.natural.min) {
+    if (fx.natural && p.r.attack && (p.r.attack.hit || fx.natural.evenMiss) && p.r.attack.nat >= natMin) {
       if (fx.natural.self) naturalSelf.push(...fx.natural.stages); // Metal Claw, Ancient Power: the user's
       else ch.stages.push(...fx.natural.stages);
       if (fx.natural.table && p.r.attack.hit) {
@@ -549,28 +781,98 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   }
 
   // 6) write everything
+  // healing dice (Recover, Moonlight, Heal Pulse, Wish, Swallow...): one small throw
+  const movePow = rules.movePower(attacker, raw, false) ?? 0;
+  const lvlIdx = rules.levelIndex(attacker);
+  let selfHeal = 0;
+  const healSpec = (h) => {
+    if (h.table) return MFX.tableHeal(raw, lvlIdx, field.weather);
+    let amount = h.amount * (h.stockpile ? Math.max(1, aSheet.battle?.stockpile ?? 0) : 1);
+    if (h.sandBonus && field.weather === "sand") amount += 1;
+    return { amount, sides: h.sides };
+  };
+  const healTargets = [...changes.entries()].filter(([, ch]) => ch.healDice);
+  const wantHeal = [];
+  if (mfx.heal?.self && !(mfx.heal.stockpile && !aSheet.battle?.stockpile)) wantHeal.push({ who: "self", ...healSpec(mfx.heal) });
+  for (const [id, ch] of healTargets) wantHeal.push({ who: id, ...healSpec(ch.healDice) });
+  if (wantHeal.length) {
+    const hr = await roller.batch(wantHeal.map((w) => ({ amount: w.amount, sides: w.sides, bonus: movePow })), `${moveName_} cura`);
+    wantHeal.forEach((w, i) => {
+      const n = hr[i].dice.reduce((a, b) => a + b, 0) + movePow;
+      if (w.who === "self") selfHeal = n; else changes.get(w.who).healAmount = n;
+    });
+  }
+  if (mfx.heal?.stockpile && !aSheet.battle?.stockpile) entry.notes.push("Swallow sem Stockpile: não cura");
+  // Curse (Ghost user): its own HP; Memento / Final Gambit / explosions: the user faints
+  const ghostCurse = mfx.curse && rules.types(attacker).includes("Ghost");
+  if (ghostCurse) selfStages = [];
+  const contestWon = plans.some((p) => p.r.contest?.success);
+  const selfKO = mfx.selfKO || mfx.healingWish || (mfx.selfKOOnSuccess && contestWon) || [...changes.values()].some((c) => c.gambleKO);
+  // Pressure: a single-target move at an enemy with Pressure costs 2 PP
+  const pressure = !opts.area && targetItems.length === 1 && getSheet(targetItems[0]) && !allies(aSheet, getSheet(targetItems[0]))
+    && abilitiesOf(rules, getSheet(targetItems[0]), { gas }).includes("Pressure");
   // (a charged / invulnerable move already used its PP when it was activated)
-  const usesPP = !releasing && settings.autoPP && typeof move.pp === "number" && !!attacker.moves?.[moveName];
+  const usesPP = !releasing && settings.autoPP && typeof move.pp === "number" && !!attacker.moves?.[moveName] && !aSheet.battle?.locked;
+  const ppCost = pressure ? 2 : 1;
+  if (pressure && usesPP) entry.notes.push("Pressure: gastou 2 PP");
+  const missedAll = move.attackBonus != null && targetItems.length > 0 && !anyHit;
   await updateSheet(attackerItem.id, (s) => {
-    if (usesPP) s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - 1);
+    if (usesPP) s.pkmn.moves[moveName].pp = Math.max(0, rules.movePP(s.pkmn, moveName) - ppCost);
     spend(s, cost);
     if (copyFrom) s.pkmn.stages = { ...copyFrom, ...(s.pkmn.stages?.CritMargin ? { CritMargin: s.pkmn.stages.CritMargin } : {}) };
     for (const st of selfStages) addStage(s.pkmn, st.stat, st.delta);
+    const max = rules.maxHP(s.pkmn);
     if (fx.hpCost) { // Belly Drum: half of its max HP
-      const cost = Math.floor(rules.maxHP(s.pkmn) * fx.hpCost);
-      s.pkmn.hp.current = Math.max(0, s.pkmn.hp.current - cost);
-      entry.notes.push(`${who} perdeu ${cost} HP`);
+      const c0 = Math.floor(max * fx.hpCost);
+      s.pkmn.hp.current = Math.max(0, s.pkmn.hp.current - c0);
+      entry.notes.push(`${who} perdeu ${c0} HP`);
     }
-    if (fx.rest) { // Rest: full HP, conditions cured, sleeps
-      s.pkmn.hp.current = rules.maxHP(s.pkmn);
-      s.battle.cond = {};
-      giveCondition(s, "Asleep", rules, {});
-      entry.notes.push(`${who} recuperou todo o HP e dormiu`);
+    if (fx.rest) { // Rest: 4d6 + MOVE, non-volatile conditions cured, sleeps
+      for (const k of ["Burning", "Frozen", "Paralyzed", "Poisoned", "BadlyPoisoned", "Drowsy", "Asleep"]) clearCondition(s, k, { grace: false });
+      const r0 = giveCondition(s, "Asleep", rules, {});
+      if (r0.ok) entry.notes.push(`${who} dormiu`);
+      else { selfHeal = 0; entry.notes.push(`Rest falhou: ${r0.reason}`); }
     }
+    if (selfHeal && !mfx.heal?.delayed) {
+      const before = s.pkmn.hp.current;
+      s.pkmn.hp.current = Math.min(max, s.pkmn.hp.current + selfHeal);
+      entry.notes.push(`${who} recuperou ${s.pkmn.hp.current - before} HP (${selfHeal} rolado)`);
+    }
+    if (selfHeal && mfx.heal?.delayed) { s.battle.wish = { turns: 2, amount: selfHeal }; entry.notes.push(`Wish: ${selfHeal} HP no fim do próximo turno`); }
     if (fx.refresh) { // Refresh: Queimado, Envenenado, Paralisado
       for (const k of ["Burning", "Poisoned", "BadlyPoisoned", "Paralyzed"]) if (clearCondition(s, k)) entry.notes.push(`${who} curou ${CONDITIONS[k].label}`);
     }
     if (fx.thawSelf && clearCondition(s, "Frozen")) entry.notes.push(`${who} descongelou`);
+    // the move's own state on the user (movefx.js)
+    if (mfx.sub) {
+      const c0 = Math.floor(max / 4);
+      if (s.battle.sub) entry.notes.push("já tem um Substitute");
+      else if (s.pkmn.hp.current <= c0) entry.notes.push("Substitute falhou: HP insuficiente");
+      else { s.pkmn.hp.current -= c0; s.battle.sub = c0; entry.notes.push(`🧸 Substitute com ${c0} HP (−${c0} HP)`); }
+    }
+    if (mfx.stockpile) { s.battle.stockpile = Math.min(3, (s.battle.stockpile ?? 0) + 1); entry.notes.push(`Stockpile ${s.battle.stockpile}`); }
+    if ((mfx.spitUp || mfx.heal?.stockpile) && s.battle.stockpile) {
+      addStage(s.pkmn, "Defense", -s.battle.stockpile); addStage(s.pkmn, "SpecialDefense", -s.battle.stockpile);
+      delete s.battle.stockpile;
+    }
+    if (mfx.charge) { s.battle.charged = "Charge"; s.battle.chargedUntil = (s.battle.turns ?? 0) + 1; }
+    else if (s.battle.charged && move.damage && move.type === "Electric") delete s.battle.charged; // used up
+    if (mfx.defenseCurl) s.battle.defenseCurl = true;
+    if (mfx.minimize) s.battle.minimized = true;
+    if (mfx.roost) { s.battle.roosted = true; entry.notes.push("Roost: sem voo e sem o tipo Voador até o próximo turno"); }
+    if (mfx.magnetRise) { s.battle.magnetRise = 5; entry.notes.push("Magnet Rise: flutua (imune a Terra)"); }
+    if (mfx.lock && !s.battle.locked) { s.battle.locked = { move: moveName, left: d(2) + 1 }; entry.notes.push(`${moveName}: em frenesi por mais ${s.battle.locked.left - 1} turno(s), depois fica confuso`); }
+    if (mfx.furyCutter) s.battle.furyCutter = anyHit ? (s.battle.furyCutter ?? 0) + 1 : 0; else delete s.battle.furyCutter;
+    if (ghostCurse && contestWon) {
+      const c0 = Math.max(4, 2 * rules.level(s.pkmn));
+      s.pkmn.hp.current = Math.max(0, s.pkmn.hp.current - c0);
+      entry.notes.push(`${who} pagou ${c0} HP pela maldição`);
+    }
+    const ps = [...changes.values()].find((c) => c.painSplitSelf != null);
+    if (ps) s.pkmn.hp.current = Math.min(max, ps.painSplitSelf);
+    if (selfKO && s.pkmn.hp.current > 0) { s.pkmn.hp.current = 0; entry.notes.push(`${who} desmaiou (${moveName_})`); }
+    s.battle.lastMove = moveName;
+    if (move.attackBonus != null && targetItems.length) s.battle.lastMissed = missedAll; // Temper Flare, Stomping Tantrum
     if (pendingHelp) delete s.battle.helped; // Helping Hand is for ONE move
     if (s.battle.charging) {
       if (!releasing) entry.notes.push(`a carga de ${s.battle.charging.move} se perdeu`);
@@ -586,7 +888,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (melee) s.battle.move.meleed = [...new Set([...(s.battle.move.meleed ?? []), ...targetItems.map((t) => t.id)])];
     }
   });
-  if (usesPP) entry.pp = `${move.pp - 1}/${move.ppMax}`;
+  if (usesPP) entry.pp = `${move.pp - ppCost}/${move.ppMax}`;
   if (selfStages.length) entry.notes.push(`${who}: ${stageText(selfStages)}`);
   // Fly/Dig/Dive...: it comes back next to the target
   if (diving && targetItems[0]) {
@@ -604,29 +906,93 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (!opts.defense && running && [...changes.values()].some((c) => c.damage > 0)) {
     await endure(rules, { attackerItem, move, targets: targetItems, changes, results: entry.results });
   }
+  // what comes back to the user after the targets are written: contact abilities, Synchronize,
+  // Mirror Armor, drain and recoil, KO triggers
+  const back = { stages: [], give: [], damage: [], set: {}, notes: [] };
+  const fieldOps = [];
+  let dealt = 0, drained = 0;
+  const infiltrator = aMods.infiltrator;
   for (const [id, ch] of changes) {
-    if (!ch.damage && !ch.give.length && !ch.stages.length && !ch.smack && !ch.clearHelp && !ch.syrup && !ch.cureBurn && !ch.stop) continue;
-    const r = entry.results.find((x) => x.targetId === id);
-    const ownTurn = isActive(targetItems.find((t) => t.id === id));
+    const keys = Object.keys(ch).filter((k) => !["give", "stages", "damage"].includes(k));
+    if (!ch.damage && !ch.give.length && !ch.stages.length && !keys.length) continue;
+    const self = id === attackerItem.id;
+    const r = entry.results.find((x) => x.targetId === id) ?? { effects: entry.notes };
+    const tItem = targetItems.find((t) => t.id === id) ?? (self ? attackerItem : null);
+    const ownTurn = isActive(tItem);
     await updateSheet(id, (s, dr) => {
+      const tAb = abilitiesOf(rules, s, { gas });
+      const tGround = grounded(s, tAb);
+      const max = rules.maxHP(s.pkmn);
+      const hpBefore = s.pkmn.hp.current;
       // Sentinela: the hit pulls the creature back to where it left the reach, and it stops there
       if (ch.stop && opts.oaBack && dr) {
         dr.position = { ...opts.oaBack };
         s.battle.move = { used: 0, ...(s.battle.move ?? {}), pos: { ...opts.oaBack } };
         r.effects.push("puxado de volta pro alcance (Sentinela)");
       }
-      if (ch.damage) takeDamage(s.pkmn, ch.damage);
+      // an ability absorbed the move (Volt Absorb, Flash Fire, Sap Sipper...)
+      if (ch.absorb) {
+        if (ch.absorb.heal) { s.pkmn.hp.current = Math.min(max, s.pkmn.hp.current + ch.absorb.heal); r.effects.push(`+${ch.absorb.heal} HP`); }
+        for (const st of ch.absorb.stages ?? []) { addStage(s.pkmn, st.stat, st.delta); r.effects.push(stageText([st])); }
+        if (ch.absorb.flag) s.battle[ch.absorb.flag] = true;
+      }
+      let dmgNow = ch.damage;
+      // Substitute takes the hit (sound moves and Infiltrator go through)
+      if (dmgNow && s.battle.sub && !self && !isSound(raw) && !infiltrator) {
+        s.battle.sub -= dmgNow;
+        r.effects.push(s.battle.sub > 0 ? `o Substitute aguentou (${s.battle.sub} HP)` : "o Substitute quebrou");
+        if (s.battle.sub <= 0) delete s.battle.sub;
+        dmgNow = 0;
+      }
+      if (ch.leaveOne && dmgNow >= s.pkmn.hp.current + (s.pkmn.hp.temp ?? 0) && s.pkmn.hp.current > 0) { dmgNow = Math.max(0, s.pkmn.hp.current + (s.pkmn.hp.temp ?? 0) - 1); r.effects.push("ficou com 1 HP"); }
+      if (ch.disguised === "Disguise") s.battle.disguiseBroken = true;
+      if (ch.disguised === "Ice Face") s.battle.iceFaceBroken = true;
+      if (dmgNow) {
+        takeDamage(s.pkmn, dmgNow);
+        if (!self) {
+          s.battle.lastHit = { by: attackerItem.id, round, amount: dmgNow, melee };
+          dealt += Math.min(dmgNow, hpBefore);
+          // drain from this target (Liquid Ooze turns it into damage)
+          if (mfx.drain) {
+            const n = mfx.drain.up ? Math.ceil(Math.min(dmgNow, hpBefore) / 2) : Math.floor(Math.min(dmgNow, hpBefore) / 2);
+            drained += tAb.includes("Liquid Ooze") ? -n : n;
+          }
+        }
+      }
+      if (ch.healAmount) { const b0 = s.pkmn.hp.current; s.pkmn.hp.current = Math.min(max, s.pkmn.hp.current + ch.healAmount); r.effects.push(`+${s.pkmn.hp.current - b0} HP`); }
+      if (ch.heal) s.pkmn.hp.current = Math.min(max, s.pkmn.hp.current + ch.heal);
+      const ko = hpBefore > 0 && s.pkmn.hp.current <= 0;
+      if (ko && !self) { s.battle.koBy = attackerItem.id; s.battle.koRound = round; }
       if (ch.clearHelp) delete s.battle.helped; // its Helping Hand die went into this save
       if (ch.syrup) { s.battle.syrup = ch.syrup; r.effects.push(`coberto de xarope (−1 Velocidade por turno, ${ch.syrup} turnos)`); }
       if (ch.cureBurn && clearCondition(s, "Burning")) r.effects.push("queimadura curada");
+      for (const k of ch.cure ?? []) if (clearCondition(s, k)) r.effects.push(`${CONDITIONS[k].label} curado`);
       if (ch.stop) { s.battle.move = { used: 0, ...(s.battle.move ?? {}), stopped: true }; r.effects.push("parado (Sentinela)"); }
+      if (ch.seed) { s.battle.seeded = ch.seed; r.effects.push("🌱 semeado (Leech Seed)"); }
+      if (ch.yawn) { s.battle.yawn = ch.yawn; r.effects.push("🥱 vai dormir no fim do próximo turno (Yawn)"); }
+      if (ch.curse) { s.battle.cursed = true; r.effects.push("👻 amaldiçoado"); }
+      if (ch.clearStages) { s.pkmn.stages = {}; r.effects.push("estágios zerados"); }
+      if (ch.knockOff) {
+        s.battle.itemLost = true;
+        r.effects.push(`perdeu o item (${s.pkmn.item}) até o fim da batalha`);
+        if (tAb.includes("Unburden")) s.battle.unburden = true;
+      }
+      if (ch.restrict) {
+        const kind = ch.restrict.kind;
+        if ((kind === "disable" || kind === "encore") && !ch.restrict.move) r.effects.push(`${moveName_}: o alvo ainda não usou nenhum Move`);
+        else if (tAb.includes("Aroma Veil") || tAb.includes("Oblivious") && kind === "taunt") r.effects.push(`${tAb.includes("Aroma Veil") ? "Aroma Veil" : "Oblivious"}: imune`);
+        else {
+          s.battle.restrict = { ...(s.battle.restrict ?? {}), [kind]: { turns: ch.restrict.turns, move: ch.restrict.move } };
+          r.effects.push({ taunt: "provocado: só Moves de dano (3 turnos)", encore: `Encore: só ${ch.restrict.move} (3 turnos)`, disable: `${ch.restrict.move} bloqueado (4 turnos)`, torment: "Torment: não repete Move (3 turnos)", healBlock: "Heal Block: sem cura (3 turnos)" }[kind]);
+        }
+      }
       // charging / Focus Punch: concentration (CON save, DC 10 or half the damage)
       const c = s.battle.charging;
-      if (c && !c.invuln && ch.damage > 0 && s.pkmn.hp.current > 0) {
-        const dc = Math.max(10, Math.floor(ch.damage / 2));
+      if (c && !c.invuln && dmgNow > 0 && s.pkmn.hp.current > 0) {
+        const dc0 = Math.max(10, Math.floor(dmgNow / 2));
         const n = d(20), total = n + (rules.saves(s.pkmn).CON ?? 0);
-        if (n !== 20 && (n === 1 || total < dc)) { delete s.battle.charging; r.effects.push(`perdeu a concentração em ${c.move} (CON ${total} vs CD ${dc})`); }
-        else r.effects.push(`manteve a concentração (CON ${total} vs CD ${dc})`);
+        if (n !== 20 && (n === 1 || total < dc0)) { delete s.battle.charging; r.effects.push(`perdeu a concentração em ${c.move} (CON ${total} vs CD ${dc0})`); }
+        else r.effects.push(`manteve a concentração (CON ${total} vs CD ${dc0})`);
       }
       if (ch.smack) {
         if (s.battle.charging?.invuln) { r.effects.push(`${s.battle.charging.move} cancelado`); delete s.battle.charging; }
@@ -634,22 +1000,115 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         s.battle.prone = true;
         r.effects.push("derrubado ao chão");
       }
-      if (ch.wake) { if (clearCondition(s, "Asleep")) r.effects.push("acordou com o crítico"); if (clearCondition(s, "Drowsy")) r.effects.push("não está mais sonolento"); }
-      if (ch.thaw && clearCondition(s, "Frozen")) r.effects.push("descongelou com o fogo");
+      if (ch.wake && dmgNow) { if (clearCondition(s, "Asleep")) r.effects.push("acordou com o crítico"); if (clearCondition(s, "Drowsy")) r.effects.push("não está mais sonolento"); }
+      if (ch.thaw && dmgNow && clearCondition(s, "Frozen")) r.effects.push("descongelou com o fogo");
+      // conditions: type immunity, abilities (Limber, Insomnia...), Safeguard, Misty Terrain, Substitute
+      const block = (key) => statusBlock(rules, s, key, { field, grounded: tGround, team: teamOf(s), fromOther: !self, source: { infiltrator, secondary: !!move.damage }, gas });
       for (const key of [...new Set(ch.give)]) {
         if (s.pkmn.hp.current <= 0) break;
-        const res = giveCondition(s, key, rules, { ownTurn });
+        const res = giveCondition(s, key, rules, { ownTurn, block, corrosion: aAbil.includes("Corrosion") });
         r.effects.push(res.ok ? `ficou ${CONDITIONS[res.became ?? key].label}` : `${CONDITIONS[key].label}: ${res.reason}`);
+        if (res.ok) {
+          const oc = onCondition(rules, s, res.became ?? key);
+          for (const st of oc.stages) addStage(s.pkmn, st.stat, st.delta);
+          if (oc.notes.length) r.effects.push(oc.notes.join(", "));
+          if (oc.back && !self) { back.give.push(oc.back); back.notes.push(`Synchronize de ${tItem?.name}`); }
+        }
       }
-      for (const st of ch.stages) addStage(s.pkmn, st.stat, st.delta);
-      if (ch.stages.length) r.effects.push(stageText(ch.stages));
+      // stages from someone else: Clear Body, Hyper Cutter, Contrary, Simple, Mist, Defiant, Mirror Armor...
+      if (ch.stages.length) {
+        const g = stageGuard(rules, s, ch.stages, { fromOther: !self, field, team: teamOf(s), infiltrator, gas });
+        for (const st of g.list) addStage(s.pkmn, st.stat, st.delta);
+        if (g.list.length) r.effects.push(stageText(g.list));
+        if (g.notes.length) r.effects.push(g.notes.join(", "));
+        back.stages.push(...g.reflect);
+      }
+      // abilities once the hit landed: contact (Static, Rough Skin...), Stamina, Justified, Moxie...
+      if (!self && move.damage && dmgNow > 0) {
+        const hits = Math.max(1, ch.hits ?? 1);
+        for (let i = 0; i < hits; i++) {
+          const ops = afterHit(rules, aSheet, s, move, raw, {
+            melee, noContact: aMods.noContact, crit: !!ch.crit, hpBefore, hpAfter: s.pkmn.hp.current, ko: ko && i === hits - 1,
+            natural: plans.find((p) => p.t.id === id)?.r.attack?.nat ?? 0, saveNat: plans.find((p) => p.t.id === id)?.r.save?.nat ?? null,
+            type: move.type, damaged: true, gas,
+          });
+          for (const op of ops.T) {
+            if (op.stages) for (const st of op.stages) addStage(s.pkmn, st.stat, st.delta);
+            if (op.give) { const res = giveCondition(s, op.give, rules, { ownTurn, block }); if (res.ok) r.effects.push(`ficou ${CONDITIONS[op.give].label}`); }
+            if (op.set) Object.assign(s.battle, op.set);
+            if (op.field) fieldOps.push({ ...op.field, by: tItem?.name ?? "" });
+            if (op.note && (op.stages || op.give || op.set || !op.field)) r.effects.push(op.note + (op.stages ? ` (${stageText(op.stages)})` : ""));
+          }
+          for (const op of ops.A) {
+            if (op.stages) back.stages.push(...op.stages);
+            if (op.give) back.give.push(op.give);
+            if (op.damage) back.damage.push(op.damage);
+            if (op.set) Object.assign(back.set, op.set);
+            if (op.note) back.notes.push(`${op.note}${op.damage ? ` −${op.damage} HP` : ""}${op.give ? `: ${CONDITIONS[op.give].label}` : ""}${op.stages ? ` (${stageText(op.stages)})` : ""}`);
+          }
+        }
+      }
     });
     const after = getSheet((await OBR.scene.items.getItems([id]))[0]);
-    if (after && r) {
+    if (after && r && r.targetId) {
       r.hpAfter = `${after.pkmn.hp.current}/${rules.maxHP(after.pkmn)}`;
-      if (after.pkmn.hp.current <= 0) r.effects.push("DESMAIOU");
+      if (after.pkmn.hp.current <= 0 && !r.effects.includes("DESMAIOU")) r.effects.push("DESMAIOU");
     }
+    if (ch.breakScreens && after) { if (await clearSide(teamOf(after), ["reflect", "lightScreen", "auroraVeil"])) entry.notes.push("as telas do alvo quebraram"); }
+    if (ch.clearTerrain) { await clearTerrain(); entry.notes.push("o terreno foi desfeito"); }
   }
+
+  // drain, recoil, the miss of Jump Kick/Supercell Slam, and what came back from the targets
+  const aAfter = getSheet((await OBR.scene.items.getItems([attackerItem.id]))[0]);
+  if (aAfter && aAfter.pkmn.hp.current > 0 || drained || back.damage.length) {
+    const magic = aAbil.includes("Magic Guard");
+    const recoil = mfx.recoil && dealt > 0 && !aAbil.includes("Rock Head") && !magic ? Math.floor(dealt * mfx.recoil) : 0;
+    const missHurt = mfx.missRecoil && missedAll && !magic
+      ? (mfx.missRecoil === "2lvl" ? Math.max(4, 2 * rules.level(attacker)) : Math.floor(rules.maxHP(attacker) / 2)) : 0;
+    if (drained || recoil || missHurt || back.damage.length || back.give.length || back.stages.length || Object.keys(back.set).length) {
+      await updateSheet(attackerItem.id, (s) => {
+        const max = rules.maxHP(s.pkmn);
+        if (drained > 0) { const b0 = s.pkmn.hp.current; s.pkmn.hp.current = Math.min(max, s.pkmn.hp.current + drained); entry.notes.push(`${who} drenou ${s.pkmn.hp.current - b0} HP`); }
+        if (drained < 0) { takeDamage(s.pkmn, -drained); entry.notes.push(`Liquid Ooze: ${who} perdeu ${-drained} HP`); }
+        if (recoil) { takeDamage(s.pkmn, recoil); entry.notes.push(`${who} sofreu ${recoil} de recuo`); }
+        if (missHurt) { takeDamage(s.pkmn, missHurt); entry.notes.push(`${who} errou e sofreu ${missHurt} de dano`); }
+        for (const n of back.damage) takeDamage(s.pkmn, n);
+        const block = (key) => statusBlock(rules, s, key, { field, grounded: aGrounded, team: teamOf(s), fromOther: true, source: {}, gas });
+        for (const key of [...new Set(back.give)]) giveCondition(s, key, rules, { ownTurn: isActive(attackerItem), block });
+        const g = stageGuard(rules, s, back.stages, { fromOther: true, field, team: teamOf(s), gas });
+        for (const st of g.list) addStage(s.pkmn, st.stat, st.delta);
+        Object.assign(s.battle, back.set);
+        if (s.pkmn.hp.current <= 0) entry.notes.push(`${who} desmaiou`);
+      });
+    }
+    if (back.notes.length) entry.notes.push(...back.notes.map((n) => `${who}: ${n}`));
+  }
+
+  // field moves and effects on several creatures
+  const fieldMove = FIELD_MOVES[moveName];
+  if (fieldMove) { const n = await startField(fieldMove, { team: teamOf(aSheet), by: who }); if (n) entry.notes.push(n); }
+  for (const op of fieldOps) { const n = await startField({ ...op, rounds: 5 }, { by: op.by }); if (n) entry.notes.push(`${op.by}: ${n}`); }
+  if (mfx.clearTerrain === "before") { await clearTerrain(); entry.notes.push("o terreno foi desfeito"); }
+  if (mfx.fusion) { const f = await getField(); f.fusion = { move: moveName, round }; await OBR.scene.setMetadata({ "com.pmp-fichas/field": f }); }
+  if (mfx.haze || mfx.cureTeam || mfx.perish) {
+    const radius = mfx.haze ?? mfx.cureTeam ?? 18;
+    const near = [{ item: attackerItem, sheet: aSheet, dist: 0, ally: true }, ...others].filter((o) => o.dist <= radius + 0.05);
+    for (const o of near) {
+      if (mfx.cureTeam && !o.ally) continue;
+      if (mfx.perish && (o.sheet.battle?.perish != null || abilitiesOf(rules, o.sheet, { gas }).includes("Soundproof"))) continue;
+      await updateSheet(o.item.id, (s) => {
+        if (mfx.haze) s.pkmn.stages = {};
+        if (mfx.cureTeam) for (const k of Object.keys(conditionsOf(s))) clearCondition(s, k, { grace: false });
+        if (mfx.perish) { s.battle.perish = 3; s.battle.perishLevelOver = rules.level(s.pkmn) > rules.level(attacker); }
+      });
+    }
+    entry.notes.push(mfx.haze ? "todos os estágios em 12 m foram zerados" : mfx.cureTeam ? "aliados curados das condições" : `🎵 Perish Song: quem ouviu desmaia em 3 rodadas (${near.length})`);
+  }
+  if (mfx.healingWish && aSheet.trainer) {
+    await OBR.scene.items.updateItems([aSheet.trainer], (ds) => { for (const d0 of ds) if (d0.metadata["com.pmp-fichas/trainer"]) d0.metadata["com.pmp-fichas/trainer"] = { ...d0.metadata["com.pmp-fichas/trainer"], healingWish: true }; });
+    entry.notes.push("o próximo Pokémon liberado volta com a vida cheia e sem condições");
+  }
+  if (mfx.hazard) entry.notes.push(`${moveName_}: marque a área no mapa (6 m de raio); quem entrar sofre o efeito`);
 
   // switching and trapping moves (trainer.js): Dragon Tail, Roar, U-turn, Mean Look...
   await switchEffects(rules, { attackerItem, moveName, targetItems, entry });

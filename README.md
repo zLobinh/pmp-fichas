@@ -202,6 +202,41 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   combate, o painel do treinador abre pro dono escolher quem entra.
 - **Trainer Card:** o painel do treinador virou um cartão com os 6 Pokémon em molduras, a arte do token do
   treinador, 8 insígnias (o mestre clica pra marcar) e o botão *Descanso longo* (equipe toda, fora do combate).
+- **Habilidades automáticas (abilities.js):** as 287 habilidades dos Pokémon do PMP entram nas contas quando
+  dá: acerto/CD (Compound Eyes, Hustle, Victory Star), crítico (Super Luck, Merciless, Sniper, Battle Armor),
+  dados de dano (Blaze/Torrent/Overgrow/Swarm, Guts, Technician, Adaptability, Iron Fist, Strong Jaw, Sharpness,
+  Sheer Force, Tough Claws, auras, Ruin...), tipo (Normalize, Pixilate, Refrigerate, Liquid Voice, Scrappy, Tinted
+  Lens), imunidades e absorção (Levitate, Volt/Water Absorb, Flash Fire, Sap Sipper, Lightning Rod, Storm Drain,
+  Bulletproof, Soundproof, Wonder Guard, Telepathy, Good as Gold, Magic Bounce), cortes de dano (Thick Fat,
+  Fluffy, Fur Coat, Filter/Solid Rock, Multiscale, Sturdy, Disguise, Ice Face, Friend Guard, Marvel Scale),
+  contato (Static, Flame Body, Poison Point, Effect Spore, Rough Skin, Iron Barbs, Gooey, Mummy, Cute Charm,
+  Poison Touch), ao ser atingido (Stamina, Justified, Rattled, Weak Armor, Anger Point, Berserk, Emergency Exit),
+  ao derrubar (Moxie, Chilling/Grim Neigh, Aftermath, Innards Out), condições (Limber, Insomnia, Immunity, Own
+  Tempo, Synchronize, Shield Dust...), estágios (Clear Body, Hyper Cutter, Big Pecks, Contrary, Simple, Defiant,
+  Competitive, Mirror Armor), fim do turno (Speed Boost, Shed Skin, Poison Heal, Magic Guard, Rain Dish, Dry Skin,
+  Healer, Bad Dreams, Truant, Slow Start), entrada (Drizzle e cia., terrenos, Intimidate, Download, Moody, Trace,
+  Costar, Screen Cleaner, Supreme Overlord, Anticipation, Forewarn, Frisk), iniciativa e deslocamento (Swift Swim,
+  Chlorophyll, Sand Rush, Slush Rush, Quick Feet, Stall, Unburden), ação bônus (Prankster, Gale Wings, Triage),
+  Pressure, Damp, Dazzling/Queenly Majesty, Armor Tail, Unseen Fist, Long Reach, Run Away, Neutralizing Gas,
+  Mold Breaker. As que só mudam forma ou revelam algo (Illusion, Imposter, Zen Mode...) aparecem como aviso.
+- **Clima, terreno e campo (field.js):** Rain Dance, Sunny Day, Sandstorm, Hail, Snowscape e os terrenos ficam
+  na cena por 5 rodadas e aparecem na ficha rápida. Chuva/sol mudam os dados de Água/Fogo, Thunder/Hurricane
+  acertam na chuva, Blizzard no granizo, Solar Beam sai na hora no sol, areia/granizo machucam no começo do
+  turno, Grassy Terrain cura, Electric Terrain acorda, Misty Terrain bloqueia condições, Psychic Terrain tira a
+  ação bônus. Reflect, Light Screen, Aurora Veil, Safeguard, Mist e Tailwind valem pra equipe inteira; Trick
+  Room fica registrado. (O livro centra o clima no usuário; a extensão considera a luta toda.)
+- **Moves especiais (movefx.js):** cura (Recover, Roost, Moonlight pela tabela do clima, Rest, Wish, Heal
+  Pulse, Swallow), dreno (Giga Drain, Drain Punch...), recuo (Double-Edge, Brave Bird...), erro que machuca
+  (Jump Kick, Supercell Slam), golpes variáveis (Fury Attack, Bullet Seed, Rock Blast: d8 de golpes extras, Skill
+  Link = 4), dano fixo (Seismic Toss, Night Shade, Dragon Rage, Super Fang, Counter, Mirror Coat, Metal Burst,
+  Endeavor, Final Gambit, Pain Split), dados dobrados por condição (Hex, Venoshock, Brine, Facade, Acrobatics,
+  Payback, Revenge, Assurance, Smelling Salts, Wake-Up Slap, Lash Out, Bolt Beak, Fusion Bolt/Flare, Minimize,
+  Weather Ball, Terrain Pulse, Rising Voltage...), tamanho (Heavy Slam, Low Kick), vida (Eruption, Reversal),
+  iniciativa (Gyro Ball, Electro Ball), Stockpile/Spit Up, Fury Cutter, Return/Frustration, Hidden Power, Body
+  Press, Foul Play, Psyshock, False Swipe, Knock Off, Leech Seed, Curse, Perish Song, Yawn, Taunt, Encore,
+  Disable, Torment, Heal Block, Outrage/Thrash (frenesi + confusão), Substitute, Charge, Haze, Clear Smog,
+  Aromatherapy, Heal Bell, Explosion, Memento, Healing Wish. Spikes/Stealth Rock/Toxic Spikes/Sticky Web
+  avisam pra marcar a área no mapa.
 - **Moves de vários golpes** ("Faça dois/três ataques": Double Kick, Dual Wingbeat, Triple Dive...): uma rolagem
   de ataque por golpe, bônus de MOVE só no 1º, Triple Axel com 1x/2x/3x os dados. Com mais de um alvo
   selecionado, os golpes se revezam entre eles.

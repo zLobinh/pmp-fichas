@@ -9,10 +9,12 @@
 //
 // State in sheet.battle: alt (meters), move { used, pos, dash, standUp }, prone, grounded,
 // charging { move, turn, invuln, kind, from, focus }, prepared { move, targetIds }.
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.6";
-import { d, fmtM } from "./rules.js?v=0.9.6";
-import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.6";
-import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.6";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.7";
+import { d, fmtM } from "./rules.js?v=0.9.7";
+import { conditionsOf, inInitiative, isActive, econOf, moveTiming, PRETTY, TurnError, guardedLoop, allies } from "./battle.js?v=0.9.7";
+import { pointMeters, altitudeOf, checkRange, distanceMeters } from "./map.js?v=0.9.7";
+import { movementMods, abilitiesOf } from "./abilities.js?v=0.9.7";
+import { fieldCached } from "./field.js?v=0.9.7";
 
 const r1 = (n) => Math.round(n * 10) / 10;
 const mod = (v) => Math.floor((v - 10) / 2);
@@ -93,9 +95,14 @@ export function movement(rules, item) {
   else if (cond.Grappled) { base = 0; why = "agarrado: deslocamento 0"; }
   else if (b.thrown && alt > 0 && !sp.fly) { base = 0; why = "arremessado: no ar até o fim do próximo turno"; }
   else if (b.move?.stopped) { base = 0; why = "Sentinela: deslocamento 0 neste turno"; }
-  else if (cond.Paralyzed || cond.Drowsy) {
-    base = Math.floor(base / 2 / 1.5) * 1.5; // half, rounded down to 1,5 m
-    why = cond.Paralyzed ? "paralisado: metade do deslocamento" : "sonolento: metade do deslocamento";
+  else {
+    // abilities and the field: Swift Swim, Chlorophyll, Tailwind (×2), Quick Feet (+1,5 m), Slow Start (½)
+    const mm = movementMods(rules, sheet, fieldCached(), sheet.team ?? "inimigos");
+    if (mm.why.length) { base = Math.floor((base * mm.mult + mm.add) / 1.5) * 1.5; why = mm.why.join(", "); }
+    if ((cond.Paralyzed || cond.Drowsy) && !mm.ignoreParalysis) {
+      base = Math.floor(base / 2 / 1.5) * 1.5; // half, rounded down to 1,5 m
+      why = cond.Paralyzed ? "paralisado: metade do deslocamento" : "sonolento: metade do deslocamento";
+    }
   }
   const mv = b.move ?? {};
   const budget = base * (mv.dash ? 2 : 1);
@@ -285,6 +292,8 @@ const canReact = (sheet) => {
 export async function checkOpportunity(rules, mover, from, to) {
   const ms = getSheet(mover);
   if (!ms) return [];
+  // Run Away: it can't be the target of an attack of opportunity
+  if (abilitiesOf(rules, ms).includes("Run Away")) return [];
   // (also who came in by a switch and waits for the initiative: it has its reaction)
   const others = await OBR.scene.items.getItems((i) => i.id !== mover.id && i.metadata?.[SHEET_KEY] && !i.metadata[SHEET_KEY].ball && (inInitiative(i) || i.metadata[SHEET_KEY].battle?.joinNextRound));
   const out = [];
