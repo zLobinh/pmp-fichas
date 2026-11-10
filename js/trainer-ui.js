@@ -2,11 +2,11 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.9";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.9";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode } from "./trainer.js?v=0.9.9";
-import { distanceMeters } from "./map.js?v=0.9.9";
-import { longRest } from "./qol.js?v=0.9.9";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.10";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.10";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, createFromCode } from "./trainer.js?v=0.9.10";
+import { distanceMeters } from "./map.js?v=0.9.10";
+import { longRest } from "./qol.js?v=0.9.10";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");

@@ -1,7 +1,7 @@
 // Things that touch the map: distances and range, Pretty Sordid initiative, hit/miss animations.
-import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.9";
-import { fmtM } from "./rules.js?v=0.9.9";
-import { getRoller } from "./dice.js?v=0.9.9";
+import { OBR, SDK, ID, getSheet, pushLog, getSettings } from "./store.js?v=0.9.10";
+import { fmtM } from "./rules.js?v=0.9.10";
+import { getRoller } from "./dice.js?v=0.9.10";
 
 // ------------------------------------------------------------------ distance & range
 
@@ -13,10 +13,20 @@ function sizeCells(item) {
   return Math.max(1, Math.round((item.image.width / item.grid.dpi) * Math.abs(item.scale?.x ?? 1)));
 }
 
-// how many grid cells the token covers, from the PMP size (the species "size": "Médio (1,5 m)"):
-// Miúdo ½, Pequeno/Médio 1, Grande 2, Enorme 3, Imenso 4 — the same footprint the reach rules use
+// how many grid cells wide the token is: the Pokémon's height from the PMP size ("Pequeno (0,8 m)")
+// over the meters of a cell (1,5 m): a 0,8 m Lycanroc ~½ square, a 9,2 m Onix ~6. Never under ⅓ of a
+// square (still clickable). Without a height, the category: Miúdo ½, Pequeno/Médio 1, Grande 2...
+// (the reach and range rules keep using the category, not this)
 export const SIZE_CELLS = [0.5, 1, 1, 2, 3, 4];
-export const tokenCells = (rules, pkmn) => SIZE_CELLS[rules.sizeRank(pkmn)] ?? 1;
+export function heightOf(rules, pkmn) {
+  const m = /([\d]+(?:[.,]\d+)?)\s*~?\s*m\b/i.exec(rules.speciesData(pkmn)?.size ?? "");
+  return m ? Number(m[1].replace(",", ".")) : null;
+}
+export function tokenCells(rules, pkmn, cellM = 1.5) {
+  const h = heightOf(rules, pkmn);
+  if (!h) return SIZE_CELLS[rules.sizeRank(pkmn)] ?? 1;
+  return Math.max(1 / 3, Math.round((h / cellM) * 100) / 100);
+}
 // in an item draft (+ its sheet): makes the image cover `cells` grid cells at scale 1, keeping the
 // left/right flip; a token in the pokéball keeps its small size and gets the right one back on release
 export function fitDraft(dr, cells, sheet = null) {
@@ -130,8 +140,8 @@ export async function rollInitiative(rules, item) {
   // Velocidade: + stage x proficiency (pág. 73)
   // abilities and weather: Swift Swim, Chlorophyll, Sand Rush, Slush Rush, Unburden (+2× prof.),
   // Quick Feet (×1,5, ignores paralysis), Slow Start (½), Stall (always last)
-  const { initiativeMods } = await import("./abilities.js?v=0.9.9");
-  const { fieldNow } = await import("./field.js?v=0.9.9");
+  const { initiativeMods } = await import("./abilities.js?v=0.9.10");
+  const { fieldNow } = await import("./field.js?v=0.9.10");
   const im = initiativeMods(rules, sheet, await fieldNow().catch(() => ({})));
   const bonus = rules.initiative(pkmn) + (pkmn.stages?.Speed ?? 0) * rules.proficiency(pkmn) + im.add;
   const settings = await getSettings();

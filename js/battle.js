@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.9";
-import { d } from "./rules.js?v=0.9.9";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.9";
-import { fieldNow, expireField, grounded } from "./field.js?v=0.9.9";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.9";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.10";
+import { d } from "./rules.js?v=0.9.10";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.10";
+import { fieldNow, expireField, grounded } from "./field.js?v=0.9.10";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.10";
 
 // ------------------------------------------------------------------ conditions
 
@@ -509,7 +509,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.9");
+    const { distanceMeters } = await import("./map.js?v=0.9.10");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;

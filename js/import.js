@@ -1,5 +1,5 @@
-import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.9";
-import { fitDraft, tokenCells } from "./map.js?v=0.9.9";
+import { OBR, ID, SHEET_KEY, loadRules, parseExport, syncTheme } from "./store.js?v=0.9.10";
+import { fitDraft, tokenCells, cellMeters } from "./map.js?v=0.9.10";
 
 const itemId = new URLSearchParams(location.search).get("id");
 const $ = (id) => document.getElementById(id);
@@ -33,11 +33,12 @@ $("ok").onclick = async () => {
     // a player's Pokémon join the players' team; the GM picks (enemies by default)
     const gm = (await OBR.player.getRole()) === "GM";
     const team = gm ? $("team").value : "jogadores";
+    const cellM = await cellMeters();
     await OBR.scene.items.updateItems([itemId], (drafts) => {
       for (const d of drafts) {
         d.metadata[SHEET_KEY] = { pkmn, owner: OBR.player.id, team, imported: Date.now() };
         if ($("rename").checked) d.name = name;
-        if ($("resize").checked) fitDraft(d, tokenCells(rules, pkmn));
+        if ($("resize").checked) fitDraft(d, tokenCells(rules, pkmn, cellM));
       }
     });
     OBR.notification.show(`Ficha de ${name} (nível ${rules.level(pkmn)}) importada!`, "SUCCESS");

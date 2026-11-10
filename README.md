@@ -210,7 +210,11 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   sair da pokébola, o token fica com a imagem, o tamanho, o nome e os tipos (na ficha dos outros) do disfarce;
   o primeiro dano desfaz a ilusão (e voltar pra pokébola também).
 - **Adicionar pelo código:** no cartão do treinador, "Adicionar Pokémon pelo código do app" cria o token com o
-  sprite da extensão Imagem por Link (mesma lista), o tamanho certo e a ficha, já na pokébola.
+  sprite da extensão Imagem por Link (mesma lista), o tamanho certo e a ficha, já na pokébola (invisível e
+  travado desde o começo, os jogadores não veem). O sprite segue a ficha: forma (Hisui usa o GIF "Nome2",
+  Alola/Galar/outras usam a arte do app), Mega/Primal (X/Y/Z pela arte do app, as outras pelo GIF) e fêmea.
+  As formas que a coleção de GIFs não tem entram no repositório `mapas` pelo
+  `imagem-link/tools/montar_formas.py` (arquivos `forma_...`, que o `montar_pokemon.py` não apaga).
 - **Tamanho do token pelo PMP:** Miúdo ½ quadrado, Pequeno/Médio 1, Grande 2, Enorme 3, Imenso 4. Na
   importação (opção marcada por padrão), na criação pelo código e no menu "Ajustar tamanho (PMP)".
 - **Sem spam de avisos:** rolagens e danos não aparecem mais como notificação na tela (ficam no registro do

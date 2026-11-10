@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.9";
-import { d, fmtM } from "./rules.js?v=0.9.9";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.9";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.9";
-import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.9";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.9";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.10";
+import { d, fmtM } from "./rules.js?v=0.9.10";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.10";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.10";
+import { FIELD_ABILITIES, startField, clearSide } from "./field.js?v=0.9.10";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.10";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -85,10 +85,34 @@ async function sprites() {
   spriteIndex ??= fetch(`${SPRITES}index.json`).then((r) => r.json()).catch((e) => { spriteIndex = null; throw new Error(`Não achei a lista de Pokémon (${e.message})`); });
   return spriteIndex;
 }
-// the best sprite for this Pokémon: same Pokédex number (or name), the female one for females,
-// otherwise the plain one
+// the best sprite for this Pokémon, in this order:
+//   Mega (is_mega + mega_variant X/Y/Z): "Mega Charizard" X/Y art, or the Mega GIF;
+//   form (variant "Zoroark de Hisui"): the GIF "Zoroark2" for Hisui/Origem, else the app's form art
+//   ("forma_" entries: n = Pokémon, v = "Alola", "Forma Therian"...);
+//   plain: same species name / Pokédex number, the female one for females, otherwise the plain one
 export async function spriteFor(rules, pkmn) {
   const list = await sprites();
+  const species = pkmn.species?.current ?? "";
+  const lc = (s) => (s ?? "").toLowerCase();
+  const vd = rules.species[species]?.variant_data;
+  const variant = pkmn.variant && pkmn.variant !== vd?.default && pkmn.variant !== species ? pkmn.variant : null;
+  const form = variant ? variant.replace(species, "").trim().replace(/^de\s+/i, "") : null; // "Hisui", "Forma Therian"
+  if (pkmn.is_mega) {
+    const mv = pkmn.mega_variant && !/padr/i.test(pkmn.mega_variant) ? pkmn.mega_variant.toUpperCase() : null;
+    const names = [/alola/i.test(form ?? "") ? `mega alolan ${lc(species)}` : null, `mega ${lc(species)}`, `primal ${lc(species)}`].filter(Boolean);
+    for (const n of names) {
+      const pool = list.filter((e) => lc(e.n) === n);
+      if (!pool.length) continue;
+      const pick = (mv ? pool.find((e) => e.v.toUpperCase() === mv) : null) ?? pool.find((e) => !e.v && !e.f.startsWith("forma_")) ?? pool[0];
+      if (pick) return pick;
+    }
+  }
+  if (form) {
+    const gif = /hisui|origem/i.test(form) ? list.find((e) => lc(e.n) === `${lc(species)}2`) : null;
+    const art = list.find((e) => lc(e.n) === lc(species) && lc(e.v) === lc(form))
+      ?? list.find((e) => lc(e.n) === lc(species) && e.f.startsWith("forma_") && lc(form).includes(lc(e.v)));
+    if (gif || art) return gif ?? art;
+  }
   // by the species name first, then the PMP Pokédex number of the species; the "number" in the
   // app's export is not always the national one (a Lycanroc came with Whismur's 293)
   const name = (pkmn.species?.current ?? "").toLowerCase();
@@ -99,6 +123,7 @@ export async function spriteFor(rules, pkmn) {
   if (!pool.length) pool = list.filter((e) => e.d === Number(pkmn.number));
   if (!pool.length) return null;
   pool = pool.filter((e) => e.n === pool[0].n);
+  pool = pool.filter((e) => !e.f.startsWith("forma_")).length ? pool.filter((e) => !e.f.startsWith("forma_")) : pool;
   const female = /^f/i.test(pkmn.gender ?? "") || /female|f[eê]mea/i.test(pkmn.gender ?? "");
   const word = name.replace(pool[0].n.toLowerCase(), "").trim(); // "vulpix alola" -> "alola"
   return (word ? pool.find((e) => e.v.toLowerCase().includes(word)) : null)
@@ -112,8 +137,8 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells } = await import("./map.js?v=0.9.9");
-  const cells = tokenCells(rules, pkmn);
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.10");
+  const cells = tokenCells(rules, pkmn, await cellMeters());
   const dpi = await OBR.scene.grid.getDpi();
   // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
   // it appear), linked to the trainer in the same go; "Liberar" brings it out at its real size
@@ -343,7 +368,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.9");
+    const { switchReactions } = await import("./protect.js?v=0.9.10");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -377,7 +402,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.9");
+    const { switchReactions } = await import("./protect.js?v=0.9.10");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }

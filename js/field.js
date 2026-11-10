@@ -4,7 +4,7 @@
 //
 // The book centres weather and terrain on the user (15 m / 12 m); the extension treats them as
 // covering the whole fight, which is how they are used at the table almost always.
-import { OBR, SHEET_KEY } from "./store.js?v=0.9.9";
+import { OBR, SHEET_KEY } from "./store.js?v=0.9.10";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
 const ROUND_KEY = "com.pretty-initiative/roundCount";
