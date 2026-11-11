@@ -1,18 +1,18 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.16";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.16";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.16";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.17";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.17";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.17";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.16";
-import { rollPending } from "./trainer.js?v=0.9.16";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.16";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.16";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.16";
-import { runPrepared } from "./prepared.js?v=0.9.16";
-import { fieldNow, fieldText } from "./field.js?v=0.9.16";
-import { seesTarget } from "./combat.js?v=0.9.16";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.16";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.17";
+import { rollPending } from "./trainer.js?v=0.9.17";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.17";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.17";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.17";
+import { runPrepared } from "./prepared.js?v=0.9.17";
+import { fieldNow, fieldText } from "./field.js?v=0.9.17";
+import { seesTarget } from "./combat.js?v=0.9.17";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.17";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -350,6 +350,14 @@ function moveRow(m) {
         await roll(true);
         return;
       }
+      // Reflect / Light Screen / Aurora Veil: no template to aim; first ask whom the shield covers
+      if (SCREENS[m.name]) {
+        state.mode = "screen";
+        state.targets = [];
+        state.turnError = null;
+        render();
+        return;
+      }
       if (m.rangeInfo.kind === "area") {
         // turn/action check first, so nobody aims for nothing
         try {
@@ -443,6 +451,23 @@ function powerToggle(move) {
   return h("label", { class: "row small", style: "gap:4px", title: feat },
     h("input", { type: "checkbox", checked: !!state.power, onchange: (e) => { state.power = e.target.checked; } }),
     move.attackBonus != null ? "−5 no acerto, +10 de dano" : "−5 na CD, +10 de dano se falhar");
+}
+
+// "Só em mim" (dano recebido pela metade) or "ampliar para os aliados" no raio (redução de só 1/3)
+const SCREENS = { Reflect: "corpo a corpo", "Light Screen": "à distância", "Aurora Veil": "corpo a corpo e à distância" };
+function screenBar() {
+  if (state.mode !== "screen") return null;
+  const move = pendingMove();
+  const r = move.rangeInfo.meters ?? 4.5;
+  const go = (expand) => { state.screenExpand = expand; state.mode = "self"; roll(true); };
+  const cancel = () => { Object.assign(state, { mode: "idle", pending: null }); render(); };
+  return h("div", { class: "hud-target" },
+    h("div", { class: "small" }, h("b", {}, move.label.replace(/ PMP$/, "")), ` · protege contra ataques ${SCREENS[state.pending]}`),
+    h("div", { class: "row", style: "gap:6px;margin-top:6px;flex-wrap:wrap" },
+      h("button", { class: "small primary", disabled: state.busy, onclick: () => go(false), title: "O escudo fica em volta de você: dano recebido pela metade" }, "🛡 Só em mim (½ do dano)"),
+      h("button", { class: "small", disabled: state.busy, onclick: () => go(true), title: `O escudo cobre os aliados a até ${fmtM(r)}: a redução cai para 1/3` }, `👥 Ampliar p/ aliados ${fmtM(r)} (−⅓)`),
+      h("button", { class: "small", onclick: cancel }, "Cancelar")),
+    h("div", { class: "small muted", style: "margin-top:4px" }, "Não vale contra crítico. O escudo fica fixo onde foi criado."));
 }
 
 function targetBar() {
@@ -576,7 +601,8 @@ async function roll(ignoreRange, area = false, force = false) {
       if (!state.targets[0]) throw new Error("Escolha no mapa quem agarrar.");
       state.last = await grapple(state.rules, state.item, state.targets[0], { ignoreRange, force });
     } else {
-      state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers, power: !!state.power });
+      state.last = await useMove(state.rules, state.item, state.pending, state.targets, { ignoreRange, area, force, helpers, power: !!state.power, expand: !!state.screenExpand });
+      state.screenExpand = false;
     }
     state.last._fresh = state.last.roller !== "Dice+";
     Object.assign(state, { mode: "idle", pending: null, targets: [], ranges: new Map(), outOfRange: null, turnError: null, turnCode: null, helperCands: [], helpers: new Set() });
@@ -674,6 +700,7 @@ function render() {
     moveBlock(),
     actionsBlock(),
     waitingBlock(),
+    screenBar(),
     targetBar(),
     aimBar(),
     h("div", { class: "hud-moves" }, rules.moveList(pkmn).map(moveRow)),

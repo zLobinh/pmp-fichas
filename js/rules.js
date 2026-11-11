@@ -1,6 +1,6 @@
 // PMP rules, ported from the app (pokedex/pokemon.lua). Function names follow the Lua ones.
 // Not ported: trainer bonuses, mega. Amplification points (items, abilities, STAB): amp.js.
-import { moveAmp, damageDice } from "./amp.js?v=0.9.16";
+import { moveAmp, damageDice } from "./amp.js?v=0.9.17";
 
 export const ATTRS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };

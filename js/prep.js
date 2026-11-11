@@ -7,15 +7,15 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.16";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.16";
-import * as MFX from "./movefx.js?v=0.9.16";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.16";
-import { startCombat } from "./qol.js?v=0.9.16";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.16";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.16";
-import { useMove } from "./combat.js?v=0.9.16";
-import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.16";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.17";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.17";
+import * as MFX from "./movefx.js?v=0.9.17";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.17";
+import { startCombat } from "./qol.js?v=0.9.17";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.17";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.17";
+import { useMove } from "./combat.js?v=0.9.17";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.17";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -298,17 +298,23 @@ export async function aiTurn(rules, item, prep) {
     // ---- weather, terrain, screens, hazards
     if (fm) {
       if (!fresh(name)) continue;
-      let v = 0;
+      let v = 0, expand = false;
       // weather / terrain: worth it when it helps more of us than of them
       const helps = (types) => typeCount(friends, types) - 0.7 * typeCount(enemies, types);
       if (fm.weather && field.weather !== fm.weather && (WEATHER_TYPES[fm.weather] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.45 * Math.max(0, helps(WEATHER_TYPES[fm.weather]));
       else if (fm.terrain && field.terrain !== fm.terrain && (TERRAIN_TYPES[fm.terrain] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.4 * Math.max(0, helps(TERRAIN_TYPES[fm.terrain]));
-      // screens / Tailwind: every ally inside counts
+      // screens: only on itself (½) or widened to the allies inside (−⅓ each) when there are any;
+      // Tailwind & co.: every ally inside counts
+      else if (["reflect", "lightScreen", "auroraVeil"].includes(fm.side) && (!fm.needs || fm.needs.includes(field.weather))) {
+        const inside = await nearMe(friends, fm.r ?? 4.5);
+        expand = inside >= 2;
+        v = ref * (fm.needs ? 0.6 : 0.45) * (expand ? 0.75 * inside : 1);
+      }
       else if (fm.side && (!fm.needs || fm.needs.includes(field.weather))) v = ref * (fm.needs ? 0.6 : 0.45) * Math.max(1, 0.8 * await nearMe(friends, fm.r ?? 6));
       else if (fm.hazard && enemyReserves) v = ref * 0.4;
       if (!v) continue;
       const e = fm.at === "target" ? enemies[0] : null;
-      add({ name, md, kind: "field", targets: e ? [e] : [], opts: { ignoreRange: true }, need: 0, score: v });
+      add({ name, md, kind: "field", targets: e ? [e] : [], opts: { ignoreRange: true, expand }, need: 0, score: v });
       continue;
     }
     // ---- area damage
@@ -515,7 +521,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.16")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.17")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])

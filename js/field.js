@@ -9,7 +9,7 @@
 //   - an area with a duration joins Pretty Sordid right after its user, "Sunny Day (5)": on its turn
 //     the count goes down (areaTurn) and at 0 it disappears. Out of combat it runs out by the round.
 // Trick Room has no area: it stays in the scene metadata (FIELD_KEY).
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.16";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.17";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
 export const AREA_KEY = `${ID}/area`;
@@ -71,6 +71,13 @@ export const FIELD_ABILITIES = {
   "Misty Surge": { terrain: "misty", r: 12 }, "Psychic Surge": { terrain: "psychic", r: 12 },
 };
 
+// screens: "half" (only on the user) or "third" (widened to the allies); the better one if both are there
+export const SCREEN_SIDES = ["reflect", "lightScreen", "auroraVeil"];
+function sideValue(m, prev) {
+  if (!SCREEN_SIDES.includes(m.effect)) return true;
+  const v = m.expanded ? "third" : "half";
+  return prev === "half" ? "half" : v;
+}
 export const roundNow = async () => Number((await OBR.scene.getMetadata())[ROUND_KEY] ?? 1);
 export const areaOf = (item) => item?.metadata?.[AREA_KEY] ?? null;
 const live = (e, round) => !!e && (e.until == null || round < e.until);
@@ -127,8 +134,10 @@ export async function fieldNow(f = null, round = null, item = null) {
   const sides = {};
   for (const a of here.filter((x) => areaOf(x).kind === "side")) {
     const m = areaOf(a);
+    // a screen only on its user covers no one else
+    if (SCREEN_SIDES.includes(m.effect) && !m.expanded && item && m.byId && item.id !== m.byId) continue;
     sides[m.team] ??= {};
-    sides[m.team][m.effect] = true;
+    sides[m.team][m.effect] = sideValue(m, sides[m.team][m.effect]);
   }
   return {
     weather, terrain, sides, trickRoom: live(f.trickRoom, round), raw: f, round, areas: here,
@@ -164,7 +173,10 @@ export function fieldCached(item = null) {
     }
     if (m.kind === "weather") out.weather = m.effect;
     if (m.kind === "terrain") out.terrain = m.effect;
-    if (m.kind === "side") { out.sides[m.team] ??= {}; out.sides[m.team][m.effect] = true; }
+    if (m.kind === "side" && !(SCREEN_SIDES.includes(m.effect) && !m.expanded && item && m.byId && item.id !== m.byId)) {
+      out.sides[m.team] ??= {};
+      out.sides[m.team][m.effect] = sideValue(m, out.sides[m.team][m.effect]);
+    }
   }
   return out;
 }
@@ -172,7 +184,7 @@ export function fieldCached(item = null) {
 const labelOf = (m) => m.kind === "weather" ? WEATHER[m.effect]?.label : m.kind === "terrain" ? TERRAIN[m.effect]?.label
   : m.kind === "side" ? SIDE[m.effect]?.label : m.kind === "hazard" ? HAZARD[m.effect]?.label : m.move;
 const iconOf = (m) => (m.kind === "weather" ? WEATHER : m.kind === "terrain" ? TERRAIN : m.kind === "side" ? SIDE : m.kind === "hazard" ? HAZARD : {})[m.effect]?.icon ?? "🌀";
-export const areaName = (m) => `${iconOf(m)} ${m.move ?? labelOf(m)}${m.left != null ? ` (${m.left})` : ""}`;
+export const areaName = (m) => `${iconOf(m)} ${m.move ?? labelOf(m)}${m.expanded === false ? ` só ${m.by}` : m.expanded ? " aliados" : ""}${m.left != null ? ` (${m.left})` : ""}`;
 
 // creates the area. ctx: { team, by (name), user (item), target (item), move }
 // spec: { weather | terrain | side | hazard | vortex (type) | trickRoom, rounds, r, follow, at }
@@ -190,7 +202,9 @@ export async function startField(spec, ctx = {}) {
   if (!center) return "";
   const kind = spec.weather ? "weather" : spec.terrain ? "terrain" : spec.side ? "side" : spec.hazard ? "hazard" : spec.vortex ? "vortex" : null;
   const effect = spec.weather ?? spec.terrain ?? spec.side ?? spec.hazard ?? spec.vortex;
-  const r = spec.r ?? (spec.vortex ? 0.75 : 6);
+  // Reflect / Light Screen / Aurora Veil: only around the user unless widened to the allies (ctx.expand)
+  const screen = SCREEN_SIDES.includes(spec.side);
+  const r = screen && !ctx.expand ? 0.75 : spec.r ?? (spec.vortex ? 0.75 : 6);
   const areas = await getAreas();
   const team = ctx.team ?? (user ? getSheet(user)?.team ?? "inimigos" : null);
   // the same weather/terrain already over this spot: "não reinicia a duração"; another one touching
@@ -224,7 +238,7 @@ export async function startField(spec, ctx = {}) {
   // in Pretty Sordid right after its user (who used it, or who it was used by)
   const uInit = user?.metadata?.[PRETTY];
   const inInit = rounds != null && typeof uInit?.count === "string";
-  const meta = { kind, effect, move: ctx.move ?? null, by: ctx.by ?? "", byId: user?.id ?? null, team, r, left: rounds, until: rounds != null ? round + rounds : null, at: Date.now(), inInit };
+  const meta = { kind, effect, move: ctx.move ?? null, by: ctx.by ?? "", byId: user?.id ?? null, team, r, left: rounds, until: rounds != null ? round + rounds : null, at: Date.now(), inInit, ...(screen ? { expanded: !!ctx.expand } : {}) };
   let b = SDK.buildShape().shapeType("CIRCLE").width(diameter).height(diameter).position({ ...center.position })
     .fillColor(color).fillOpacity(kind === "vortex" ? 0.35 : 0.14).strokeColor(color).strokeOpacity(0.9).strokeWidth(Math.max(2, g.dpi * 0.03))
     .layer("DRAWING").name(areaName(meta)).locked(kind !== "hazard").disableHit(kind !== "hazard")
@@ -248,7 +262,7 @@ export async function startField(spec, ctx = {}) {
   await OBR.scene.items.addItems(add);
   if (inInit) await reorderInitiative();
   const what = labelOf(meta);
-  return `${iconOf(meta)} ${what}${rounds != null ? ` por ${rounds} rodadas` : ""}${kind === "side" ? ` (aliados a até ${String(r).replace(".", ",")} m)` : ""}`;
+  return `${iconOf(meta)} ${what}${rounds != null ? ` por ${rounds} rodadas` : ""}${kind !== "side" ? "" : !screen ? ` (aliados a até ${String(r).replace(".", ",")} m)` : ctx.expand ? ` ampliado: aliados a até ${String(r).replace(".", ",")} m, dano −1/3` : ` só em ${ctx.by || "quem usou"}: dano pela metade`}`;
 }
 
 // Pretty Sordid's order after an area joined (same sort as map.setInitiative)

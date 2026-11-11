@@ -4,26 +4,26 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.16";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.16";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.16";
-import { getRoller } from "./dice.js?v=0.9.16";
-import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.16";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.16";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.17";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.17";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.17";
+import { getRoller } from "./dice.js?v=0.9.17";
+import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.17";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.17";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError, moveTiming,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.16";
+} from "./battle.js?v=0.9.17";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.16";
+} from "./tactics.js?v=0.9.17";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.16";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.16";
-import * as MFX from "./movefx.js?v=0.9.16";
-import * as AMP from "./amp.js?v=0.9.16";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.17";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.17";
+import * as MFX from "./movefx.js?v=0.9.17";
+import * as AMP from "./amp.js?v=0.9.17";
 
 export { TurnError };
 
@@ -662,12 +662,18 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
       // abilities and field after the type: Thick Fat, Fur Coat, Fluffy...; Defeatist; Solar Beam in the rain
       final = Math.floor(final * p.tm.mult);
-      // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores)
+      // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores).
+      // Only on the user: damage halved; widened to the allies: only 1/3 less. They don't stack: the best one.
       const side = p.tSheet && (tFields.get(p.t.id) ?? field).sides?.[teamOf(p.tSheet)];
-      if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)
-        && ((melee && side.reflect) || (!melee && side.lightScreen) || side.auroraVeil)) {
-        final = Math.floor(final / 2);
-        p.r.effects.push(`${side.auroraVeil ? "Aurora Veil" : melee ? "Reflect" : "Light Screen"}: dano pela metade`);
+      if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)) {
+        const shields = [[melee ? "reflect" : "lightScreen", melee ? "Reflect" : "Light Screen"], ["auroraVeil", "Aurora Veil"]]
+          .filter(([k]) => side[k]).map(([k, label]) => ({ label, cut: side[k] === "third" ? 1 / 3 : 1 / 2 }))
+          .sort((a, b) => b.cut - a.cut);
+        if (shields.length) {
+          const best = shields[0];
+          final = Math.floor(final * (1 - best.cut));
+          p.r.effects.push(`${best.label}: ${best.cut === 1 / 2 ? "dano pela metade" : "dano −1/3 (ampliado)"}`);
+        }
       }
       if (p.tm.red) final = Math.max(0, final - p.tm.red);
       // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
@@ -1109,7 +1115,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
     // an Illusion stuck from an older version (no saved look): the hit shows its real self too
     if (ch.damage > 0 && tNow && !self && !getSheet(tNow)?.realLook) {
-      const { dropIllusion } = await import("./trainer.js?v=0.9.16");
+      const { dropIllusion } = await import("./trainer.js?v=0.9.17");
       if (await dropIllusion(rules, tNow).catch(() => false)) r.effects.push("a ilusão se desfez!");
     }
     // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
@@ -1149,7 +1155,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const fieldMove = FIELD_MOVES[moveName];
   // (an area on the map: weather/Tailwind follow the user, terrain/screens stay here, hazards on the target)
   const userNow = (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem;
-  if (fieldMove) { const n = await startField(fieldMove, { team: teamOf(aSheet), by: who, user: userNow, target: targetItems[0] ?? null, move: moveName_ }); if (n) entry.notes.push(n); }
+  if (fieldMove) { const n = await startField(fieldMove, { team: teamOf(aSheet), by: who, user: userNow, target: targetItems[0] ?? null, move: moveName_, expand: !!opts.expand }); if (n) entry.notes.push(n); }
   for (const op of fieldOps) {
     const spec = op.weather ? { weather: op.weather, r: 15, follow: true } : { terrain: op.terrain, r: 12 };
     const n = await startField({ ...spec, rounds: 5 }, { by: op.by, user: op.user, move: op.ability });
@@ -1186,7 +1192,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (running && !opts.defense && targetItems.length) {
     const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
     if (hitIds.size) {
-      const { afterHitReactions } = await import("./protect.js?v=0.9.16");
+      const { afterHitReactions } = await import("./protect.js?v=0.9.17");
       const hit = await OBR.scene.items.getItems([...hitIds]);
       await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
     }
