@@ -1,14 +1,14 @@
 // The sheet popover of one token: HP, stats, statuses, targets and moves.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.14";
-import { getRoller } from "./dice.js?v=0.9.14";
-import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.14";
-import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.14";
-import { openStages } from "./ui.js?v=0.9.14";
-import { TurnError } from "./combat.js?v=0.9.14";
-import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.14";
-import { useMove, describe, seesTarget } from "./combat.js?v=0.9.14";
-import { TYPE_COLOR, die } from "./ui.js?v=0.9.14";
-import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.14";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, pushLog, getSettings, h, syncTheme } from "./store.js?v=0.9.16";
+import { getRoller } from "./dice.js?v=0.9.16";
+import { AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.16";
+import { CONDITIONS, STAGES, STAGE_SHORT, conditionsOf, giveCondition, clearCondition, stage, addStage, canSeeFull, teamOf, TEAMS, ampPoints, redPoints, pointsText } from "./battle.js?v=0.9.16";
+import { openStages } from "./ui.js?v=0.9.16";
+import { TurnError } from "./combat.js?v=0.9.16";
+import { ATTRS, ATTR_PT, TYPE_PT, signed, d } from "./rules.js?v=0.9.16";
+import { useMove, describe, seesTarget } from "./combat.js?v=0.9.16";
+import { TYPE_COLOR, die } from "./ui.js?v=0.9.16";
+import { OutOfRange, rollInitiative, initiativeOf } from "./map.js?v=0.9.16";
 const typeTag = (t) => h("span", { class: "tag", style: `background:${TYPE_COLOR[t] ?? "#777"}` }, TYPE_PT[t] ?? t);
 const modOf = (v) => Math.floor((v - 10) / 2);
 
@@ -55,7 +55,8 @@ function statsCard(pkmn) {
     h("div", { class: "kv" },
       h("div", {}, h("b", {}, rules.ac(pkmn)), h("span", { class: "muted small" }, "CA")),
       h("div", {}, h("b", {}, signed(rules.proficiency(pkmn))), h("span", { class: "muted small" }, "Prof.")),
-      h("div", {}, h("b", {}, signed(rules.stabBonus(pkmn))), h("span", { class: "muted small" }, "STAB")),
+      // (STAB is 1 damage point now, shown in the moves' dice; only Adaptability changes it)
+      rules.abilities(pkmn).includes("Adaptability") ? h("div", { title: "Adaptability: o STAB vale 2 Pontos de Amplificação em vez de 1" }, h("b", {}, "2 pts"), h("span", { class: "muted small" }, "STAB")) : null,
       h("div", {}, h("b", {}, signed(rules.initiative(pkmn))), h("span", { class: "muted small" }, "Inic.")),
       sp?.WSp ? h("div", {}, h("b", {}, `${sp.WSp}`), h("span", { class: "muted small" }, "Desl.")) : null,
       h("span", { class: "spacer" }),

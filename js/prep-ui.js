@@ -1,10 +1,10 @@
 // The "Preparar batalha" popup. The GM sets the sides, the format, the reserves, the arena and (for a
 // battle between the GM's own trainers) the simulation; each controller picks the starters of the
 // trainers it plays and says "pronto". The others' picks are never shown, only "escolhendo" / "pronto".
-import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.14";
-import { TEAMS } from "./battle.js?v=0.9.14";
-import { trainerOf, party, inBall } from "./trainer.js?v=0.9.14";
-import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.14";
+import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.16";
+import { TEAMS } from "./battle.js?v=0.9.16";
+import { trainerOf, party, inBall } from "./trainer.js?v=0.9.16";
+import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.16";
 
 const POP = `${ID}/prep`;
 const root = document.getElementById("root");
@@ -23,7 +23,8 @@ async function load() {
 }
 // who plays this trainer from this browser: its owner, or the GM for the NPCs
 const mine = (t) => trainerOf(t)?.owner === state.me || (state.isGM && state.npc[t.id]);
-const edit = (fn) => setPrep((p) => { fn(p); return p; });
+// (a write that fails — the scene full, no permission — says so instead of looking like it worked)
+const edit = (fn) => setPrep((p) => { fn(p); return p; }).catch((e) => { state.msg = `Não deu pra salvar: ${e?.message ?? e}`; render(); });
 
 function gmBlock(p) {
   if (!state.isGM || p.status === "done") return null;
@@ -100,6 +101,7 @@ function render() {
     state.msg ? h("div", { class: "small ok" }, state.msg) : null,
     p.status === "done" && p.result ? h("div", { class: "card prep-result" }, h("h2", {}, "Resultado"), p.result.lines.map((l) => h("div", { class: "small" }, l)),
       state.isGM ? h("button", { class: "small", style: "margin-top:6px", title: "Apaga a arena, as áreas de clima/terreno e este resultado", onclick: async () => { await endPrep(); OBR.popover.close(POP); } }, "Encerrar e limpar o mapa") : null) : null,
+    p.status === "starting" ? h("div", { class: "card small" }, "⏳ Mandando os iniciais e rolando a iniciativa…") : null,
     p.status === "running" ? h("div", { class: "card small" }, p.sim ? "🤖 Batalha sendo simulada… acompanhe pelo mapa e pelo registro." : "⚔ Batalha em andamento.",
       state.isGM && p.sim ? h("button", { class: "small", style: "margin-left:6px", onclick: () => edit((x) => { x.stop = true; x.sim = false; }) }, "Parar a simulação") : null,
       state.isGM ? h("button", { class: "small", style: "margin-left:6px", title: "Tira os lutadores da iniciativa e apaga a arena e as áreas de clima/terreno", onclick: async () => {

@@ -4,25 +4,26 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.14";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.14";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.14";
-import { getRoller } from "./dice.js?v=0.9.14";
-import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.14";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.14";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.16";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.16";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.16";
+import { getRoller } from "./dice.js?v=0.9.16";
+import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.16";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.16";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError, moveTiming,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.14";
+} from "./battle.js?v=0.9.16";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.14";
+} from "./tactics.js?v=0.9.16";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.14";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.14";
-import * as MFX from "./movefx.js?v=0.9.14";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.16";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.16";
+import * as MFX from "./movefx.js?v=0.9.16";
+import * as AMP from "./amp.js?v=0.9.16";
 
 export { TurnError };
 
@@ -101,14 +102,13 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     isLast = order[order.length - 1] === attackerItem.id;
   }
   const newType = MFX.typeFor(mfx, move, { field, grounded: aGrounded });
+  // (the damage points — items, abilities, STAB, weather, terrain — come from here: amp.js)
   const aMods = attackMods(rules, aSheet, { ...move, type: newType ?? move.type }, raw,
-    { field, melee, stab: move.stab > 0, isLast, others, fx, prof: rules.proficiency(attacker), gas });
+    { field, melee, isLast, others, fx, prof: rules.proficiency(attacker), gas, grounded: aGrounded });
   if (newType || aMods.type) {
     const nt = aMods.type ?? newType;
-    // STAB follows the new type
-    const stab = rules.types(attacker).includes(nt) ? rules.stabBonus(attacker) : 0;
-    if (move.damage) move.damage = { ...move.damage, bonus: move.damage.bonus - (move.stab ?? 0) + stab };
-    move.stab = stab;
+    // STAB follows the new type (1 Ponto de Amplificação, counted in attackMods)
+    move.stab = move.damage && nt !== "Typeless" && rules.types(attacker).includes(nt) ? 1 : 0;
     move.type = nt;
     entry.type = TYPE_PT[nt] ?? nt;
     if (newType) entry.notes.push(`tipo ${TYPE_PT[nt] ?? nt}`);
@@ -338,27 +338,26 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   // "Atacante Bestial": once per turn, melee damage dice rolled twice keeping the higher
   const beast = melee && hasDice && rules.hasFeat(attacker, "Atacante Bestial") && !(tracked && aSheet.battle?.move?.beast);
   if (beast) entry.notes.push("Atacante Bestial: dano rolado 2x, fica o maior");
-  // { amount, flat, reroll (1 keep higher / -1 keep lower), halvings } for these points
-  // m: dice changes from abilities, weather/terrain and the move itself (movefx/abilities):
-  //   mult/add (dice count), double, halfMore (+½ the dice; 1 die: roll twice keep higher),
-  //   halve (½ the dice; 1 die: roll twice keep lower), groups (+1 die per 2), keepHigh/keepLow, flat
+  // The damage dice, the app's way (amp.js / pokemon.lua get_damage_mod_stab, livro novo): every source
+  // is POINTS that add up — the "Mudanças de Status" ones (a, rd), items, abilities, STAB, weather,
+  // terrain (aMods.pts / redPts), and the move's own conditions (m):
+  //   halfMore ("+½ dos dados") = 2 pontos, groups = 2 pontos cada, keepHigh = 1 ponto, keepLow = 1 de Redução;
+  //   double / halve / diceMult multiply the dice AFTER the points (step 7, like the crit);
+  //   mult / add change the move's base dice (Stockpile, Fury Cutter, sizes...).
+  // -> { amount, flat, reroll (1 maior / -1 menor), halvings, rest (the other "times" of a 2x move) }
   const dmgSpec = (a, rd, m = {}) => {
-    const pts = pointsSummary(a, rd);
-    let base = hasDice ? dmg.amount * (m.mult ?? 1) + (m.add ?? 0) : 0;
-    if (m.double) base *= 2;
-    if (m.halfMore) base += Math.floor(base / 2);
-    if (m.halve) base = Math.floor(base / 2);
-    base = hasDice ? Math.max(1, base) : 0;
-    const one = hasDice && dmg.amount === 1;
-    const amped = hasDice ? amplifyDice(base, dmg.dice, pts.ampGroups + (m.groups ?? 0)) : { amount: 0, bonus: 0 };
-    const keepHigh = pts.ampReroll || helpOneDie || beast || !!m.keepHigh || (!!m.halfMore && one);
-    const keepLow = pts.redReroll || !!m.keepLow || (!!m.halve && one);
+    const ampT = a + (m.pts ?? 0) + (m.halfMore ? 2 : 0) + 2 * (m.groups ?? 0) + (m.keepHigh ? 1 : 0) + (helpOneDie ? 1 : 0) + (beast ? 1 : 0);
+    const redT = rd + (m.redPts ?? 0) + (m.keepLow ? 1 : 0);
+    const diceMult = (m.diceMult ?? 1) * (m.double ? 2 : 1) * (m.halve ? 0.5 : 1);
+    const base = hasDice ? Math.max(1, dmg.amount * (m.mult ?? 1) + (m.add ?? 0)) : 0;
+    const d = AMP.damageDice({ amount: base, sides: hasDice ? dmg.dice : 0, amp: ampT, red: redT, diceMult, perThree: m.perThree ?? 0, halfProf: aProfHalf });
     return {
-      a, rd,
-      amount: amped.amount + helpExtra + ownBoost,
-      flat: amped.bonus + (pts.ampFlat ? aProfHalf : 0) - (pts.redFlat ? aProfHalf : 0) + (m.flat ?? 0),
-      reroll: keepHigh && !keepLow ? 1 : keepLow && !keepHigh ? -1 : 0,
-      halvings: pts.redHalvings,
+      a: d.amp, rd: d.red,
+      amount: d.amount + helpExtra + ownBoost,
+      flat: d.flat + (m.flat ?? 0),
+      reroll: d.reroll,
+      halvings: d.halvings,
+      rest: { amount: d.restAmount + ownBoost, reroll: d.restReroll, flat: m.flat ?? 0 },
     };
   };
   // what doesn't depend on the target
@@ -366,15 +365,23 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     // (Pursuit on the one leaving, Bolt Beak / Fishious Rend on the one coming in: dice doubled)
     mult: uDice.mult, add: uDice.add, double: aMods.double || uDice.double || !!opts.switchDouble, halfMore: aMods.halfMore || uDice.halfMore,
     halve: uDice.halve, groups: aMods.groups + (uDice.groups ?? 0), keepHigh: aMods.keepHigh || uDice.keepHigh, keepLow: aMods.keepLow, flat: aMods.flat,
+    pts: aMods.pts, redPts: aMods.redPts + (uDice.redPts ?? 0), diceMult: aMods.diceMult, perThree: aMods.perThree,
   };
   const baseSpec = dmgSpec(amp, red, uMods);
   const dmgAmount = baseSpec.amount;
-  if (amp || red) entry.notes.push(`pontos de dano: ${pointsText(amp, red, dmg?.amount || 1, dmg?.dice || 8) || "—"}`);
+  if (dmg && (baseSpec.a || baseSpec.rd)) {
+    // (Life Orb's point follows its own rule: +1 die per 3)
+    const p3 = Math.min(uMods.perThree, Math.floor(baseSpec.a));
+    const txt = [p3 ? "Life Orb: +1 dado a cada 3" : "", AMP.pointsText(baseSpec.a - p3, baseSpec.rd)].filter(Boolean).join(" · ");
+    entry.notes.push(`Amplificação ${String(baseSpec.a).replace(".", ",")}${baseSpec.rd ? ` · Redução ${String(baseSpec.rd).replace(".", ",")}` : ""}: ${txt || "—"}`);
+  }
   if (helpExtra) entry.notes.push(`Helping Hand: +${helpExtra}d${dmg.dice} de dano`);
   else if (helpOneDie) entry.notes.push("Helping Hand: dano rolado 2x, fica o maior");
   const parts = [];
   const want = (p) => parts.push(p) - 1;
-  const dmgParts = (sp = baseSpec) => Array.from({ length: dmg.times }, () => [want({ amount: sp.amount, sides: dmg.dice, bonus: dmg.bonus, tag: "dmg" }), sp.reroll ? want({ amount: sp.amount, sides: dmg.dice, bonus: 0, tag: "dmg" }) : null]);
+  // (a "2x" move: the points only change the first one, pokemon.lua; the others roll the plain dice)
+  const timeSpec = (sp, i) => (i === 0 || !sp.rest ? sp : { ...sp, ...sp.rest });
+  const dmgParts = (sp = baseSpec) => Array.from({ length: dmg.times }, (_, i) => { const s = timeSpec(sp, i); return [want({ amount: s.amount, sides: dmg.dice, bonus: dmg.bonus, tag: "dmg" }), s.reroll ? want({ amount: s.amount, sides: dmg.dice, bonus: 0, tag: "dmg" }) : null]; });
 
   // targets the move can't touch
   for (const b of blocked) entry.results.push({ target: null, note: `${b.t.name}: ${b.reason}, não foi atingido`, effects: [] });
@@ -464,7 +471,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     // damage this target receives: its own "dano recebido" points join the attacker's
     const inA = tSheet?.battle?.ampIn ?? 0, inR = (tSheet?.battle?.redIn ?? 0) + tm.redPoints;
     const tMods = { ...uMods, double: uMods.double || td.double, add: uMods.add + td.add, groups: uMods.groups + (td.groups ?? 0),
-      keepHigh: uMods.keepHigh || tm.keepHigh, keepLow: uMods.keepLow || tm.keepLow };
+      pts: uMods.pts + (tm.keepHigh ? 1 : 0), redPts: uMods.redPts + (tm.keepLow ? 1 : 0) };
     const spec0 = dmgSpec(amp + inA, red + inR, tMods);
     // Triple Axel: the 2nd strike rolls twice the dice, the 3rd three times; the MOVE bonus only on the 1st
     // (Fury Attack & co.: the extra strikes roll the base dice, without MOVE)
@@ -507,8 +514,8 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     return useB ? { dice: dice(second), total: b } : { dice: dice(main), total: a };
   };
   const sumDamage = (list, sp = baseSpec) => {
-    const hits = list.map((x) => sumHit(x, sp));
-    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + sp.flat - (sp.cut ?? 0), 0) };
+    const hits = list.map((x, i) => ({ ...sumHit(x, timeSpec(sp, i)), flat: timeSpec(sp, i).flat }));
+    return { dice: hits.map((h) => h.dice), total: hits.reduce((a, h) => a + h.total + dmg.bonus + h.flat - (sp.cut ?? 0), 0) };
   };
 
   const changes = new Map(); // targetId -> { damage, give: [], stages: [], wake, thaw, smack, clearHelp }
@@ -602,7 +609,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (fickle) p.r.effects.push("Fickle Beam: dados dobrados");
   }
   const crits = plans.filter((p) => p.extraSets > 0 && p.dmg && p.hitFactor > 0);
-  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.flatMap(() => Array.from({ length: p.extraSets }, () => ({ amount: p.spec.amount, sides: dmg.dice, bonus: 0, tag: "dmg" })))), `${moveName_} CRÍTICO`) : [];
+  const critRolls = crits.length ? await roller.batch(crits.flatMap((p) => p.dmg.flatMap((_, i) => Array.from({ length: p.extraSets }, () => ({ amount: timeSpec(p.spec, i).amount, sides: dmg.dice, bonus: 0, tag: "dmg" })))), `${moveName_} CRÍTICO`) : [];
 
   // 4) damage: stages, burn, type, defense
   if (dmg) {
@@ -654,7 +661,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       final = Math.floor(final * eff);
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
       // abilities and field after the type: Thick Fat, Fur Coat, Fluffy...; Defeatist; Solar Beam in the rain
-      final = Math.floor(final * p.tm.mult * uDice.finalMult * (aMods.halveFinal ? 0.5 : 1));
+      final = Math.floor(final * p.tm.mult);
       // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores)
       const side = p.tSheet && (tFields.get(p.t.id) ?? field).sides?.[teamOf(p.tSheet)];
       if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)
@@ -664,7 +671,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       }
       if (p.tm.red) final = Math.max(0, final - p.tm.red);
       // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
-      const halvings = p.dmg ? p.spec.halvings : pointsSummary(0, red + (p.tSheet?.battle?.redIn ?? 0) + p.tm.redPoints).redHalvings;
+      const halvings = p.dmg ? p.spec.halvings : AMP.summary(0, baseSpec.rd + (p.tSheet?.battle?.redIn ?? 0) + p.tm.redPoints + (p.tm.keepLow ? 1 : 0)).redHalvings;
       for (let i = 0; i < halvings; i++) final = Math.floor(final / 2);
       // Multiscale / Shadow Shield (full HP: the first hit halved), Sturdy (full HP: a big hit halved, never
       // from full to 0), Disguise / Ice Face (the first hit does nothing)
@@ -1102,7 +1109,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
     // an Illusion stuck from an older version (no saved look): the hit shows its real self too
     if (ch.damage > 0 && tNow && !self && !getSheet(tNow)?.realLook) {
-      const { dropIllusion } = await import("./trainer.js?v=0.9.14");
+      const { dropIllusion } = await import("./trainer.js?v=0.9.16");
       if (await dropIllusion(rules, tNow).catch(() => false)) r.effects.push("a ilusão se desfez!");
     }
     // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
@@ -1179,7 +1186,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (running && !opts.defense && targetItems.length) {
     const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
     if (hitIds.size) {
-      const { afterHitReactions } = await import("./protect.js?v=0.9.14");
+      const { afterHitReactions } = await import("./protect.js?v=0.9.16");
       const hit = await OBR.scene.items.getItems([...hitIds]);
       await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
     }

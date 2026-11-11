@@ -7,18 +7,19 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.14";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.14";
-import * as MFX from "./movefx.js?v=0.9.14";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.14";
-import { startCombat } from "./qol.js?v=0.9.14";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.14";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.14";
-import { useMove } from "./combat.js?v=0.9.14";
-import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.14";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.16";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.16";
+import * as MFX from "./movefx.js?v=0.9.16";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.16";
+import { startCombat } from "./qol.js?v=0.9.16";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.16";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.16";
+import { useMove } from "./combat.js?v=0.9.16";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.16";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
+const LAST_KEY = `${ID}/prepLast`;
 const TURN_KEY = `${ID}/turn`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,9 +47,11 @@ export async function newPrep(trainers) {
   // two trainers of the same team would be allies: put the second on the other side
   const sides = Object.values(entries).map((e) => e.side);
   if (trainers.length === 2 && sides[0] === sides[1]) entries[trainers[1].id].side = sides[0] === "jogadores" ? "inimigos" : "jogadores";
+  // the last battle's rules come back (format, reserves, simulation)
+  const last = (await OBR.scene.getMetadata())[LAST_KEY] ?? {};
   return setPrep(() => ({
     id: crypto.randomUUID(), by: OBR.player.id, at: Date.now(), status: "setup", configured: false,
-    format: 1, reserves: 2, arena: null, sim: false, trainers: entries, result: null,
+    format: last.format ?? 1, reserves: last.reserves ?? 2, arena: null, sim: !!last.sim, trainers: entries, result: null,
   }));
 }
 
@@ -78,7 +81,9 @@ export async function startPrepared(rules) {
   let prep = await getPrep();
   if (!prep || prep.status !== "setup" || !prep.configured) return false;
   if (!Object.values(prep.trainers).every((t) => t.ready && t.starters.length)) return false;
-  prep = await setPrep((p) => ({ ...p, status: "running", startedAt: Date.now() }));
+  // "starting" while the starters come out: the simulation (and its reserves) waits for "running",
+  // otherwise it sent reserves and marked them "came in this round" in the middle of the start
+  prep = await setPrep((p) => ({ ...p, status: "starting", startedAt: Date.now() }));
   const starters = [];
   for (const [tid, t] of Object.entries(prep.trainers)) {
     const [trainer] = await OBR.scene.items.getItems([tid]);
@@ -87,18 +92,31 @@ export async function startPrepared(rules) {
       const s = getSheet(p);
       if (!inBall(s) && !t.starters.includes(p.id)) await store(rules, p, trainer, { quiet: true });
     }
-    for (const id of t.starters) {
+    // the chosen starters, and (if one of them is gone or can't come out) the next healthy ones, up to
+    // the number this trainer puts on the field (2v2 with one trainer per side: 2 each)
+    const limit = activesFor(prep, tid);
+    const healthy = (await party(tid)).filter((p) => getSheet(p).pkmn.hp.current > 0);
+    const queue = [...t.starters, ...healthy.map((p) => p.id).filter((id) => !t.starters.includes(id))];
+    const out = [];
+    for (const id of queue) {
+      if (out.length >= limit) break;
       const [p] = await OBR.scene.items.getItems([id]);
-      if (!p) continue;
-      const pos = await spotNear(trainer.position, prep.arena, [p.id]);
-      if (inBall(getSheet(p))) await release(rules, p, trainer, { pos, quiet: true });
-      else await OBR.scene.items.updateItems([p.id], (ds) => { for (const d0 of ds) d0.position = pos; });
-      // the side chosen here is the team for the fight
-      await updateSheet(p.id, (s) => { s.team = t.side; });
-      starters.push((await OBR.scene.items.getItems([p.id]))[0]);
+      if (!p || getSheet(p).pkmn.hp.current <= 0) continue;
+      try {
+        const pos = await spotNear(trainer.position, prep.arena, [p.id]);
+        if (inBall(getSheet(p))) await release(rules, p, trainer, { pos, quiet: true });
+        else await OBR.scene.items.updateItems([p.id], (ds) => { for (const d0 of ds) d0.position = pos; });
+        // the side chosen here is the team for the fight
+        await updateSheet(p.id, (s) => { s.team = t.side; });
+        const fresh = (await OBR.scene.items.getItems([p.id]))[0];
+        starters.push(fresh);
+        out.push(fresh.name);
+      } catch (e) { await pushLog({ kind: "note", attacker: trainer.name, text: `não conseguiu mandar ${p.name}: ${e.message}` }); }
     }
+    await pushLog({ kind: "note", attacker: trainer.name, text: `mandou ${out.join(" e ") || "ninguém"} (${limit} em campo)` });
   }
-  await setPrep((p) => { for (const [tid, t] of Object.entries(p.trainers)) t.used = t.starters.length; return p; });
+  await setPrep((p) => { for (const [tid, t] of Object.entries(p.trainers)) t.used = Math.max(t.starters.length, starters.filter((s) => getSheet(s).trainer === tid).length); return p; });
+  await OBR.scene.setMetadata({ [LAST_KEY]: { format: prep.format, reserves: prep.reserves, sim: !!prep.sim } });
   const names = Object.keys(prep.trainers).map((tid) => tid);
   const tNames = (await OBR.scene.items.getItems(names)).map((t) => t.name);
   await pushLog({ kind: "note", attacker: "Batalha", text: `começou: ${tNames.join(" × ")} (${prep.format}v${prep.format}, ${prep.reserves} reserva(s) cada)${prep.sim ? " — simulada" : ""}` });
@@ -111,6 +129,7 @@ export async function startPrepared(rules) {
   aiMemo.clear();
   await startCombat(rules, starters);
   for (const s of starters) await entryAbilities(rules, (await OBR.scene.items.getItems([s.id]))[0]).catch(() => {});
+  await setPrep((p) => (p ? { ...p, status: "running" } : p));
   return true;
 }
 
@@ -141,7 +160,7 @@ export async function sendReserves(rules, prep, notes = []) {
       t.used = (t.used ?? 0) + 1;
       out++;
       notes.push(`${trainer.name} mandou ${next.name}`);
-      await pushLog({ kind: "note", attacker: trainer.name, text: `mandou ${next.name} (reserva ${t.used - limit} de ${prep.reserves})` });
+      await pushLog({ kind: "note", attacker: trainer.name, text: `mandou ${next.name}${t.used > limit ? ` (reserva ${t.used - limit} de ${prep.reserves})` : " (lugar vazio no campo)"}` });
     }
   }
   await setPrep((p) => { if (p) for (const [tid, t] of Object.entries(prep.trainers)) if (p.trainers[tid]) p.trainers[tid].used = t.used; return p; });
@@ -242,6 +261,35 @@ export async function aiTurn(rules, item, prep) {
   let ref = 8;
   for (const m of moves) for (const e of enemies) if (m.md.damage && m.md.rangeInfo?.kind !== "area") ref = Math.max(ref, avgDamage(m.md) * rules.effectiveness(m.md.type, getSheet(e).pkmn) * hitChance(rules, m.md, e));
 
+  // ---- the group fight (2v2, 3v3): who to go after
+  //  threat: how hard each enemy hits our side (its best move against the one of us it hurts most);
+  //  focus: the hurt ones first (finish before they act again), and the team sticks to the one an ally
+  //  already went after this round or the last one (two hits on one beat one hit on each)
+  const threat = new Map();
+  for (const e of enemies) {
+    const es = getSheet(e);
+    let best = 0;
+    for (const n of Object.keys(es.pkmn.moves ?? {})) {
+      const md = rules.moveData(es.pkmn, n);
+      if (!md.damage) continue;
+      for (const f of friends) best = Math.max(best, avgDamage(md) * rules.effectiveness(md.type, getSheet(f).pkmn));
+    }
+    threat.set(e.id, best);
+  }
+  const maxThreat = Math.max(1, ...threat.values());
+  const teamTarget = aiMemo.get(`side:${mySide}`);
+  const group = enemies.length > 1 || friends.length > 1;
+  const weight = (e) => {
+    if (!group) return 1;
+    let w = 0.8 + 0.5 * (threat.get(e.id) ?? 0) / maxThreat; // the dangerous ones
+    w *= 1 + 0.5 * (1 - hpRatio(rules, getSheet(e)));          // the hurt ones
+    if (teamTarget && teamTarget.id === e.id && round - teamTarget.round <= 1) w *= 1.2; // focus fire
+    return w;
+  };
+  // how many of us (and of them) a weather / terrain / screen helps
+  const typeCount = (list, types) => list.filter((o) => rules.types(getSheet(o).pkmn).some((t) => types.includes(t))).length;
+  const nearMe = async (list, r) => { let n = 0; for (const o of list) if (o.id === me.id || (dist.get(o.id) ?? 99) <= r + 0.05) n++; return n; };
+
   const plans = [];
   const add = (p) => { if (p.score > 0) plans.push({ ...p, score: p.score * jitter() }); };
   for (const { name, raw, md, fx, mfx } of moves) {
@@ -251,10 +299,12 @@ export async function aiTurn(rules, item, prep) {
     if (fm) {
       if (!fresh(name)) continue;
       let v = 0;
-      if (fm.weather && field.weather !== fm.weather && (WEATHER_TYPES[fm.weather] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.7;
-      else if (fm.terrain && field.terrain !== fm.terrain && (TERRAIN_TYPES[fm.terrain] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.6;
-      else if (fm.side && !fm.needs) v = ref * 0.45;
-      else if (fm.side && fm.needs?.includes(field.weather)) v = ref * 0.6;
+      // weather / terrain: worth it when it helps more of us than of them
+      const helps = (types) => typeCount(friends, types) - 0.7 * typeCount(enemies, types);
+      if (fm.weather && field.weather !== fm.weather && (WEATHER_TYPES[fm.weather] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.45 * Math.max(0, helps(WEATHER_TYPES[fm.weather]));
+      else if (fm.terrain && field.terrain !== fm.terrain && (TERRAIN_TYPES[fm.terrain] ?? []).some((t) => myTypes.includes(t))) v = ref * 0.4 * Math.max(0, helps(TERRAIN_TYPES[fm.terrain]));
+      // screens / Tailwind: every ally inside counts
+      else if (fm.side && (!fm.needs || fm.needs.includes(field.weather))) v = ref * (fm.needs ? 0.6 : 0.45) * Math.max(1, 0.8 * await nearMe(friends, fm.r ?? 6));
       else if (fm.hazard && enemyReserves) v = ref * 0.4;
       if (!v) continue;
       const e = fm.at === "target" ? enemies[0] : null;
@@ -268,8 +318,9 @@ export async function aiTurn(rules, item, prep) {
         let v = 0;
         for (const o of caught) {
           const dmg = avgDamage(md) * rules.effectiveness(md.type, getSheet(o).pkmn) * hitChance(rules, md, o);
-          if (sideOf(prep, o) === mySide) v -= dmg * 1.5;
-          else v += dmg * (getSheet(o).pkmn.hp.current <= dmg ? 1.3 : 1);
+          // an ally caught: bad; knocking an ally out: never worth it
+          if (sideOf(prep, o) === mySide) v -= dmg * (getSheet(o).pkmn.hp.current <= dmg ? 4 : 1.5);
+          else v += dmg * (getSheet(o).pkmn.hp.current <= dmg ? 1.3 : 1) * weight(o);
         }
         add({ name, md, kind: "area", targets: caught, opts: { area: true }, need: 0, score: v });
       }
@@ -311,7 +362,8 @@ export async function aiTurn(rules, item, prep) {
           v += ref * (STATUS_VALUE[cond] ?? 0.5) * (hpRatio(rules, es) > 0.4 ? 1 : 0.4);
         }
         for (const d0 of drops) if ((es.pkmn.stages?.[d0.stat] ?? 0) > -3) v += ref * (STAGE_VALUE[d0.stat] ?? 0.1) * 0.8 * Math.min(-d0.delta, 2);
-        return v * p;
+        // in a group fight, slowing / putting to sleep the one that hits hardest is what matters
+        return v * p * (group ? 0.8 + 0.5 * (threat.get(e.id) ?? 0) / maxThreat : 1);
       };
       if (kind === "area") {
         // from where it stands: the enemies caught, minus the allies caught too
@@ -339,7 +391,7 @@ export async function aiTurn(rules, item, prep) {
         if (fx.self?.some((x) => x.delta < 0)) v *= 0.92; // Close Combat, Overheat...
         if (mfx.recoil) v *= 0.9;
         if (mfx.selfKO) v *= enemies.length === 1 && es.pkmn.hp.current <= dmg ? 1 : 0.2;
-        add({ name, md, kind: "hit", targets: [e], opts: {}, need: need(md, e), score: v - need(md, e) * 0.5 });
+        add({ name, md, kind: "hit", targets: [e], opts: {}, need: need(md, e), score: v * weight(e) - need(md, e) * 0.5 });
       }
     }
   }
@@ -359,12 +411,16 @@ export async function aiTurn(rules, item, prep) {
       const targets = c.targets.length ? await OBR.scene.items.getItems(c.targets.map((t) => t.id)) : [];
       const entry = await useMove(rules, cur, c.name, targets, c.opts);
       if (c.kind !== "hit" && c.kind !== "area") aiMemo.set(me.id, { ...memo, [c.name]: round });
+      // the team's target for focus fire
+      if (c.kind === "hit" && c.targets[0]) aiMemo.set(`side:${mySide}`, { id: c.targets[0].id, round });
       return { move: c.name, targets, entry };
     } catch (e) { fails.push(`${c.name}: ${e.message}`); } // out of range, no action, restricted: the next one
   }
   if (fails.length) await pushLog({ kind: "note", attacker: me.name, text: `não conseguiu usar um move (${[...new Set(fails)].slice(0, 2).join("; ")})` });
   // nobody in reach: walk towards the nearest enemy (inside the arena)
-  const near = enemies.sort((a, b) => Math.hypot(a.position.x - me.position.x, a.position.y - me.position.y) - Math.hypot(b.position.x - me.position.x, b.position.y - me.position.y))[0];
+  // (in a group fight, towards the team's target when there is one)
+  const near = (teamTarget && enemies.find((e) => e.id === teamTarget.id))
+    ?? enemies.sort((a, b) => Math.hypot(a.position.x - me.position.x, a.position.y - me.position.y) - Math.hypot(b.position.x - me.position.x, b.position.y - me.position.y))[0];
   for (const f of [1, 0.75, 0.5, 0.25]) {
     const p = clampTo(prep.arena, { x: me.position.x + (near.position.x - me.position.x) * f, y: me.position.y + (near.position.y - me.position.y) * f });
     const cost = await pointMeters(me.position, p);
@@ -459,7 +515,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.14")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.16")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])

@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.14";
-import { describe } from "./combat.js?v=0.9.14";
-import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.14";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.14";
-import { dicePlusReady } from "./dice.js?v=0.9.14";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.14";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.16";
+import { describe } from "./combat.js?v=0.9.16";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.16";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.16";
+import { dicePlusReady } from "./dice.js?v=0.9.16";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.16";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -38,7 +38,7 @@ function render() {
     // a prepared battle (setup, running or finished): the way back to its popup and its result
     state.prep ? h("div", { class: "card row", style: "gap:6px" },
       h("b", {}, "⚔ Batalha preparada"),
-      h("span", { class: "muted small" }, { setup: "sendo preparada", running: state.prep.sim ? "sendo simulada" : "em andamento", done: "terminou: veja o resultado" }[state.prep.status] ?? ""),
+      h("span", { class: "muted small" }, { setup: "sendo preparada", starting: "começando", running: state.prep.sim ? "sendo simulada" : "em andamento", done: "terminou: veja o resultado" }[state.prep.status] ?? ""),
       h("span", { class: "spacer" }),
       h("button", { class: "small primary", onclick: () => openPrep() }, "Abrir")) : null,
     h("div", { class: "card" },

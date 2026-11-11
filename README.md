@@ -10,7 +10,8 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   compacto com HP e os Moves. Clique num Move → clique nos alvos no mapa → *Rolar*. Depois da rolagem o
   atacante volta a ficar selecionado. Dá pra desligar a abertura automática no painel da extensão.
 - **Ficha PMP:** clique num token com ficha → *Ficha PMP*.
-  - HP com barra, dano/cura/HP temporário, CA, proficiência, STAB, iniciativa, atributos.
+  - HP com barra, dano/cura/HP temporário, CA, proficiência, iniciativa, atributos (o STAB agora é ponto de
+    Amplificação, já embutido nos dados dos moves).
   - Clique num atributo pra rolar o teste de resistência.
   - Tipos, natureza, habilidades, item, status (clique pra ligar/desligar).
   - **Moves:** acerto, CD, dano já calculados igual ao app, PP com − e +, descrição e tabela.
@@ -187,6 +188,24 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   Pontos de Amplificação e Redução de Dano (passos de 0,5, regras da pág. 57-58) em duas partes: **dano que ele
   causa** (o do app) e **dano que ele recebe** (ex.: Reflect = Redução no dano recebido). No golpe, os pontos de quem
   ataca e os de quem recebe se somam; primeiro a Amplificação, depois a Redução. Tudo entra nas contas.
+- **Amplificação igual ao app 1.98 / livro novo (amp.js):** tudo vira ponto e se soma antes de virar efeito
+  (0,5 = +½ prof.; ponto ímpar = rola 2x e fica com o maior; cada 2 = +1 dado a cada 2 dados):
+  - **STAB** não soma mais dano fixo: é 1 ponto (Adaptability troca pelos 2 dela);
+  - **itens** (app `items.amplification`): de tipo (Charcoal, Mystic Water...) 1, orbes de lendário 1, Choice
+    Band/Specs 2, Muscle Band/Wise Glasses 0,5, gemas 1 (com o ATIVAR do app), **Life Orb** 1 ponto com a regra
+    dela (+1 dado a cada 3; sobrou dado, rerrola), Deep Sea Tooth dados ×2; Light Ball, Thick Club e Punching Glove
+    somam dano fixo; Wide Lens +1 acerto/CD; Razor Claw/Scope Lens +3 crítico; Bright Powder +1 CA/resistência;
+  - **habilidades** (app `abilitydex.amplification`): Tough Claws, Iron Fist, Strong Jaw, Technician, Sharpness,
+    Blaze/Overgrow/Torrent/Swarm, Guts, -ate, Reckless... com os pontos do app; Defeatist e Slow Start viram Redução;
+    as que dependem do campo (Solar Power, Sand Force, Flash Fire, Protosynthesis, Plus/Minus, Analytic, Sheer
+    Force...) ligam sozinhas pelo campo/aliados, e o ATIVAR do app também vale;
+  - **clima e terreno:** sol/chuva +2 pontos no tipo deles e dados pela metade no oposto, terrenos 1 ponto,
+    Misty (Dragão), Grassy (Earthquake...) e areia/granizo (Solar Beam) como Redução;
+  - "dobra / metade dos dados" (Water Bubble, Charge, Facade...) multiplica os dados **depois** dos pontos;
+  - num Move "2x", os pontos só mudam o primeiro golpe (a Redução vale pra todos);
+  - a ficha mostra os dados já amplificados como o app (ex.: Ember com Charcoal "3d8+2"; só STAB "2d8+2 (rola 2x,
+    maior)"), e o registro do golpe lista as fontes e o total de pontos.
+  Os dados (moves, espécies, regras) foram reconstruídos do app novo (`tools/build_data.py`).
 - **Helping Hand como Move:** usado num aliado, o dado já rola na hora e fica esperando nele: vale pro próximo
   ataque (ou TR) dele, junto com os dados de dano extras (ou até o fim da rodada).
 - **Estágios importados do app:** o app exporta estágios vazios como lista (`"stages": []`); a extensão converte
@@ -230,6 +249,18 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   joga depois que o início do turno foi processado; se um turno travar por 15 s, ela passa. Quando nenhum
   Move dá certo, o registro diz o porquê. Quem desmaia volta e a próxima reserva entra. No fim sai o resumo
   (vencedor, rodadas, nocautes, quem mais causou dano e quem ficou de pé). Ninguém reage pelos popups.
+- **Início de 2v2 / 3v3:** a batalha fica "começando" enquanto os iniciais saem e rolam iniciativa; a
+  simulação só joga depois (antes ela mandava "reservas" no meio do início e marcava gente como "entrou
+  agora"). Cada treinador põe em campo o que o formato manda: se faltar inicial escolhido (ou um não puder
+  sair), o próximo de pé entra no lugar, e o registro diz quem cada um mandou. O formato, as reservas e a
+  simulação da última batalha voltam na próxima. Se uma mudança no popup não salvar, ele avisa.
+- **IA em grupo:** cada inimigo tem um peso pelo dano que ele faz no nosso lado (os perigosos primeiro) e pela
+  vida que falta (terminar quem está machucado); o time foca no alvo que um aliado atacou na rodada (dois golpes
+  num só valem mais que um em cada); condições vão no inimigo mais perigoso; área nunca derruba aliado; clima e
+  terreno só quando ajudam mais o nosso lado que o deles; telas/Tailwind valem mais com mais aliados dentro;
+  sem alcance, anda até o alvo do time.
+- **Marcador da área na iniciativa:** um selo redondo pequeno na borda do círculo (não em cima de quem usou o
+  Move); o ícone antigo, sem tamanho próprio, virava uma tarja preta no Owlbear.
 - **Entrou nesta rodada:** só pula a vez na rodada exata em que entrou; um registro velho de outra luta é
   descartado (era o que travava o Absol pulando a vez sem parar).
 - **Equipe Selvagens:** pra Pokémon que não são de treinador (como Neutros).

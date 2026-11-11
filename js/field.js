@@ -9,7 +9,7 @@
 //   - an area with a duration joins Pretty Sordid right after its user, "Sunny Day (5)": on its turn
 //     the count goes down (areaTurn) and at 0 it disappears. Out of combat it runs out by the round.
 // Trick Room has no area: it stays in the scene metadata (FIELD_KEY).
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.14";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.16";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
 export const AREA_KEY = `${ID}/area`;
@@ -235,9 +235,12 @@ export async function startField(spec, ctx = {}) {
   // Pretty Sordid lists tokens (images), not shapes: a small marker on the circle stands in the
   // initiative for it, right after its user, with the rounds left in its name
   if (inInit) {
-    const size = 64;
-    add.push(SDK.buildImage({ url: asset("icons/area.svg"), width: size, height: size, mime: "image/svg+xml" }, { dpi: size * 2, offset: { x: size / 2, y: size / 2 } })
-      .name(areaName(meta)).position({ ...center.position }).layer("CHARACTER").locked(true).disableHit(true)
+    // a small round badge on the circle's top edge (not on top of the Pokémon that used it); the SVG has
+    // its own size and background so it never turns into a dark rectangle
+    const size = 128;
+    const edge = { x: center.position.x, y: center.position.y - diameter / 2 };
+    add.push(SDK.buildImage({ url: asset("icons/area.svg"), width: size, height: size, mime: "image/svg+xml" }, { dpi: size / 0.45, offset: { x: size / 2, y: size / 2 } })
+      .name(areaName(meta)).position(edge).layer("CHARACTER").locked(true).disableHit(true)
       .attachedTo(item.id).disableAttachmentBehavior(["SCALE", "ROTATION", "LOCKED", "COPY"])
       .metadata({ [MARKER_KEY]: { areaId: item.id }, [PRETTY]: { count: String(Math.round((parseFloat(uInit.count) - 0.01) * 100) / 100), active: false } })
       .build());

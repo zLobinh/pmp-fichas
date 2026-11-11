@@ -7,7 +7,8 @@
 //   endTurn     - end of the Pokémon's own turn (Speed Boost, Shed Skin, Rain Dish, Poison Heal...)
 //   initiative / movement - Swift Swim, Quick Feet, Slow Start, Stall...
 // No imports from battle.js (it imports this file): plain data in, plain results out.
-import { d } from "./rules.js?v=0.9.14";
+import { d } from "./rules.js?v=0.9.16";
+import { moveAmp } from "./amp.js?v=0.9.16";
 
 const NONVOL = ["Burning", "Frozen", "Paralyzed", "Poisoned", "BadlyPoisoned", "Drowsy", "Asleep"];
 const hasNonVol = (cond) => NONVOL.some((k) => cond?.[k]);
@@ -48,7 +49,8 @@ export function attackMods(rules, aSheet, move, raw, ctx) {
   const has = (n) => ab.includes(n);
   const m = { acc: 0, dc: 0, crit: 0, groups: 0, keepHigh: false, keepLow: false, halfMore: false, double: false, halveFinal: false,
     flat: 0, type: null, ignoreResist: false, scrappy: false, sheer: false, noGuard: false, guts: false, noContact: false,
-    unseenFist: false, moldBreaker: false, infiltrator: false, serene: false, notes: [] };
+    unseenFist: false, moldBreaker: false, infiltrator: false, serene: false, notes: [],
+    pts: 0, redPts: 0, diceMult: 1, perThree: 0, overridden: false };
   const name = move.name;
   const type = move.type;
   const pk = aSheet.pkmn;
@@ -66,6 +68,10 @@ export function attackMods(rules, aSheet, move, raw, ctx) {
   if (has("Compound Eyes")) { m.acc += 2; m.dc += 2; note("Compound Eyes +2"); }
   if (near("Victory Star", 999)) { m.acc += 1; m.dc += 1; note("Victory Star +1"); }
   if (has("Super Luck")) { m.crit += 3; note("Super Luck: margem de crítico +3"); }
+  // held items (app items.bonuses)
+  const heldItem = !aSheet.battle?.itemLost ? aSheet.pkmn.item : null;
+  if (heldItem === "Wide Lens") { m.acc += 1; m.dc += 1; note("Wide Lens +1"); }
+  if (heldItem === "Razor Claw" || heldItem === "Scope Lens") { m.crit += 3; note(`${heldItem}: margem de crítico +3`); }
   if (has("No Guard") && damaging) m.noGuard = true;
   if (BREAKERS.some(has)) m.moldBreaker = true;
   if (has("Infiltrator")) m.infiltrator = true;
@@ -78,79 +84,65 @@ export function attackMods(rules, aSheet, move, raw, ctx) {
   // the move's type
   if (damaging && name !== "Struggle") {
     if (has("Normalize") && !["Hidden Power", "Judgment", "Multi-Attack", "Natural Gift", "Revelation Dance", "Techno Blast", "Weather Ball", "Terrain Pulse"].includes(name)) {
-      m.type = "Normal"; m.keepHigh = true; note("Normalize: tipo Normal, dano rolado 2x");
+      m.type = "Normal"; m.overridden = true; note("Normalize: tipo Normal");
     }
-    for (const [abil, t] of [["Pixilate", "Fairy"], ["Refrigerate", "Ice"], ["Aerilate", "Flying"], ["Galvanize", "Electric"]]) {
-      if (has(abil) && type === "Normal" && name !== "Terrain Pulse") { m.type = t; m.keepHigh = true; note(`${abil}: vira ${t}, dano rolado 2x`); }
+    for (const [abil, t] of [["Pixilate", "Fairy"], ["Refrigerate", "Ice"], ["Aerilate", "Flying"], ["Galvanize", "Electric"], ["Dragonize", "Dragon"]]) {
+      if (has(abil) && type === "Normal" && name !== "Terrain Pulse") { m.type = t; m.overridden = true; note(`${abil}: vira ${t}`); }
     }
   }
   if (has("Liquid Voice") && isSound(raw)) { m.type = "Water"; note("Liquid Voice: tipo Água"); }
   const t = m.type ?? type;
   if (!damaging) return m;
 
-  // +1 die per 2 dice ("Para cada 2 dados de dano, adicione +1 dado")
-  const boost = (why) => { m.groups += 1; note(why); };
-  if (has("Adaptability") && ctx.stab) { boost("Adaptability (no lugar do STAB)"); m.flat -= move.stab ?? 0; }
-  for (const [abil, ty] of [["Blaze", "Fire"], ["Torrent", "Water"], ["Overgrow", "Grass"], ["Swarm", "Bug"]]) {
-    if (has(abil) && t === ty && hp < max / 3) boost(`${abil}`);
-  }
-  if (has("Guts") && hasNonVol(cond) && ctx.melee) { boost("Guts"); m.guts = true; }
-  if (has("Hustle") && ctx.melee) { boost("Hustle (−2 no acerto)"); m.acc -= 2; }
-  if (has("Flare Boost") && cond.Burning && !ctx.melee) boost("Flare Boost");
-  if (has("Toxic Boost") && (cond.Poisoned || cond.BadlyPoisoned) && ctx.melee) boost("Toxic Boost");
-  if (has("Mega Launcher") && /Aura|Pulse/.test(name)) boost("Mega Launcher");
-  if (has("Strong Jaw") && BITING.includes(name)) boost("Strong Jaw");
-  if (has("Sharpness") && SLICING.includes(name)) boost("Sharpness");
-  if (has("Steelworker") && t === "Steel") boost("Steelworker");
-  if (t === "Steel") {
-    const n = (has("Steely Spirit") ? 1 : 0) + (ctx.others ?? []).filter((o) => o.ally && o.dist <= 18.05 && abilitiesOf(rules, o.sheet, ctx).includes("Steely Spirit")).length;
-    for (let i = 0; i < n; i++) boost("Steely Spirit");
-  }
-  if (has("Rocky Payload") && t === "Rock") boost("Rocky Payload");
-  if (has("Technician")) {
-    const top = raw?.Damage?.["17"];
-    if (top && top.amount * top.dice_max <= 30) boost("Technician");
-  }
-  if (has("Flash Fire") && aSheet.battle?.flashFire && t === "Fire") boost("Flash Fire");
-  if ((has("Plus") || has("Minus")) && !ctx.melee && (ctx.others ?? []).some((o) => o.ally && o.dist <= 9.05 && ["Plus", "Minus"].some((x) => abilitiesOf(rules, o.sheet, ctx).includes(x)))) boost("Plus/Minus");
-  if (has("Solar Power") && field.weather === "sun" && !ctx.melee) boost("Solar Power");
-  if (field.weather === "sun" && ctx.melee && near("Flower Gift", 6)) boost("Flower Gift");
-
-  // roll the damage twice, keep the higher
-  const high = (why) => { m.keepHigh = true; note(why); };
-  if (has("Analytic") && ctx.isLast) high("Analytic (último na iniciativa)");
-  if (has("Iron Fist") && isPunch(name)) high("Iron Fist");
-  if (has("Tough Claws") && ctx.melee) high("Tough Claws");
-  if (has("Reckless") && isRecoil(name, raw)) high("Reckless");
-  if (has("Transistor") && t === "Electric") high("Transistor");
-  if (has("Punk Rock") && isSound(raw)) high("Punk Rock");
-  if (has("Sand Force") && field.weather === "sand" && ["Ground", "Rock", "Steel"].includes(t)) high("Sand Force");
-  if (has("Protosynthesis") && (field.weather === "sun" || aSheet.battle?.booster)) high("Protosynthesis");
-  if (has("Quark Drive") && (field.terrain === "electric" || aSheet.battle?.booster)) high("Quark Drive");
-  if (near("Power Spot", 9, { self: false })) high("Power Spot de um aliado");
-  if (!ctx.melee && near("Battery", 6, { self: false })) high("Battery de um aliado");
-  for (const [abil, ty] of [["Dark Aura", "Dark"], ["Fairy Aura", "Fairy"]]) {
-    if (t === ty && anywhere(abil)) {
-      if (anywhere("Aura Break")) { m.keepLow = true; note(`${abil} revertida por Aura Break`); } else high(abil);
-    }
-  }
-  if (has("Dragon's Maw") && t === "Dragon") { m.halfMore = true; note("Dragon's Maw"); }
-  if (has("Water Bubble") && t === "Water") { m.double = true; note("Water Bubble: dados dobrados"); }
-  if (aSheet.battle?.charged && t === "Electric") { m.double = true; note(`${aSheet.battle.charged}: dados dobrados`); }
-  // Sheer Force: secondary effects off, damage rolled twice
+  // ---- Pontos de Amplificação / Redução (amp.js, igual ao app 1.98): itens, habilidades, STAB (1 ponto),
+  // clima e terreno somam pontos; "dobra / metade dos dados" multiplica os dados depois
   const fx = ctx.fx;
   const secondary = fx && (fx.natural || fx.statusHit || fx.statusFail || fx.fail?.length || fx.direct?.length || (fx.self?.some((s) => s.delta > 0)));
-  if (has("Sheer Force") && secondary && !isRecoil(name, raw) && !(fx.self ?? []).some((s) => s.delta < 0)) { m.sheer = true; high("Sheer Force (sem efeitos secundários)"); }
-  // the Ruin abilities of the others: Tablets (melee) / Vessel (ranged) weaken the attacks of whoever lacks them
+  const sheer = has("Sheer Force") && secondary && !isRecoil(name, raw) && !(fx.self ?? []).some((s) => s.delta < 0);
+  if (sheer) { m.sheer = true; note("Sheer Force: sem efeitos secundários"); }
+  const booster = !!aSheet.battle?.booster;
+  const active = (when) => ({
+    flashFire: !!aSheet.battle?.flashFire, sand: field.weather === "sand", sun: field.weather === "sun",
+    plusMinus: (ctx.others ?? []).some((o) => o.ally && o.dist <= 9.05 && ["Plus", "Minus"].some((x) => abilitiesOf(rules, o.sheet, ctx).includes(x))),
+    last: !!ctx.isLast, proto: field.weather === "sun" || booster, quark: field.terrain === "electric" || booster,
+    sheer, slowStart: (aSheet.battle?.slowStart ?? 0) < 5, charged: false, always: false, manual: false,
+  })[when] ?? false;
+  const stab = t !== "Typeless" && rules.types(pk).includes(t);
+  const own = ab.filter((a) => !["Dark Aura", "Fairy Aura"].includes(a)); // the auras count for everyone, below
+  const pts = moveAmp(rules, aSheet, own, { name, raw, type: t, melee: !!ctx.melee, stab, typeOverridden: !!m.overridden, field, grounded: ctx.grounded !== false, isLast: ctx.isLast, active });
+  m.pts += pts.amp; m.redPts += pts.red; m.diceMult *= pts.diceMult; m.perThree += pts.perThree;
+  if (stab) m.notes.push(own.includes("Adaptability") ? "STAB (Adaptability: 2 pontos)" : "STAB (1 ponto)");
+  for (const n of pts.notes) note(n);
+  // the others around (not in the app, the book's ally abilities): each one rolls 2x (1 ponto)
+  const plus = (p, why) => { m.pts += p; note(why); };
+  if (t === "Steel") for (const o of ctx.others ?? []) if (o.ally && o.dist <= 18.05 && abilitiesOf(rules, o.sheet, ctx).includes("Steely Spirit")) plus(2, "Steely Spirit de um aliado");
+  if (field.weather === "sun" && ctx.melee && !has("Flower Gift") && near("Flower Gift", 6, { self: false })) plus(2, "Flower Gift de um aliado");
+  if (near("Power Spot", 9, { self: false })) plus(1, "Power Spot de um aliado");
+  if (!ctx.melee && near("Battery", 6, { self: false })) plus(1, "Battery de um aliado");
+  for (const [abil, ty] of [["Dark Aura", "Dark"], ["Fairy Aura", "Fairy"]]) {
+    if (t === ty && anywhere(abil)) {
+      if (anywhere("Aura Break")) { m.redPts += 1; note(`${abil} revertida por Aura Break (Redução 1)`); } else plus(1, abil);
+    }
+  }
+  if (has("Hustle") && ctx.melee) { m.acc -= 2; note("Hustle: −2 no acerto corpo a corpo"); }
+  if (has("Guts") && NONVOL.some((k) => cond[k]) && ctx.melee) m.guts = true;
+  if (aSheet.battle?.charged && t === "Electric") { m.diceMult *= 2; note(`${aSheet.battle.charged}: dados dobrados`); }
+  // the Ruin abilities of the others: Tablets (melee) / Vessel (ranged): 1 ponto de Redução
   const others = (abil) => !has(abil) && (ctx.others ?? []).some((o) => o.dist <= 15.05 && abilitiesOf(rules, o.sheet, ctx).includes(abil));
-  if (ctx.melee && others("Tablets of Ruin")) { m.keepLow = true; note("Tablets of Ruin: dano rolado 2x, fica o menor"); }
-  if (!ctx.melee && others("Vessel of Ruin")) { m.keepLow = true; note("Vessel of Ruin: dano rolado 2x, fica o menor"); }
+  if (ctx.melee && others("Tablets of Ruin")) { m.redPts += 1; note("Tablets of Ruin (Redução 1)"); }
+  if (!ctx.melee && others("Vessel of Ruin")) { m.redPts += 1; note("Vessel of Ruin (Redução 1)"); }
 
-  // flat damage and halving
-  if ((has("Huge Power") || has("Pure Power")) && ctx.melee) { m.flat += 2 * (ctx.prof ?? 2); note(`${has("Huge Power") ? "Huge Power" : "Pure Power"} +${2 * (ctx.prof ?? 2)}`); }
-  if (has("Supreme Overlord") && aSheet.battle?.overlord) { const n = aSheet.battle.overlord * Math.max(1, Math.floor((ctx.prof ?? 2) / 2)); m.flat += n; note(`Supreme Overlord +${n}`); }
-  if (has("Defeatist") && hp <= max / 2) { m.halveFinal = true; note("Defeatist: dano pela metade"); }
-  if (has("Slow Start") && ctx.melee && (aSheet.battle?.slowStart ?? 0) < 5) { m.halveFinal = true; note("Slow Start: dano corpo a corpo pela metade"); }
+  // flat damage (app: damage_bonuses / items.bonus)
+  const prof = ctx.prof ?? 2;
+  const flat = (n, why) => { m.flat += n; note(`${why} +${n}`); };
+  if ((has("Huge Power") || has("Pure Power")) && ctx.melee) flat(2 * prof, has("Huge Power") ? "Huge Power" : "Pure Power");
+  if (has("Gorilla Tactics") && ctx.melee) flat(prof, "Gorilla Tactics");
+  const item = !aSheet.battle?.itemLost ? pk.item : null;
+  const sp = pk.species?.current ?? "";
+  if (item === "Light Ball" && sp.startsWith("Pikachu")) flat(2 * prof, "Light Ball");
+  if (item === "Thick Club" && (sp.startsWith("Cubone") || sp.startsWith("Marowak")) && ctx.melee) flat(2 * prof, "Thick Club");
+  if (item === "Punching Glove" && isPunch(name)) flat(prof, "Punching Glove");
+  if (has("Supreme Overlord") && aSheet.battle?.overlord) { const n = aSheet.battle.overlord * Math.max(1, Math.floor(prof / 2)); flat(n, "Supreme Overlord"); }
   return m;
 }
 
@@ -161,6 +153,7 @@ export function targetMods(rules, aSheet, tSheet, move, raw, ctx) {
   const out = { immune: null, absorb: null, mult: 1, effAdj: null, red: 0, noCritExtra: false, keepHigh: false, keepLow: false,
     sure: false, acBonus: 0, saveBonus: 0, sturdy: false, firstHalf: false, disguise: null, bounce: false, redPoints: 0, notes: [] };
   if (!tSheet?.pkmn) return out;
+  if (tSheet.pkmn.item === "Bright Powder" && !tSheet.battle?.itemLost) { out.acBonus += 1; out.saveBonus += 1; out.notes.push("Bright Powder +1 CA/resistência"); }
   const breaker = !!ctx.moldBreaker && aSheet !== tSheet;
   const ab = abilitiesOf(rules, tSheet, ctx).filter((a) => !breaker || IGNORE_BREAK.has(a));
   const has = (n) => ab.includes(n);

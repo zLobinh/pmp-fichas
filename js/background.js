@@ -1,17 +1,17 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.14";
-import { describe } from "./combat.js?v=0.9.14";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.14";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.14";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.14";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.14";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.14";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.14";
-import { runPrepared } from "./prepared.js?v=0.9.14";
-import { loadRules } from "./store.js?v=0.9.14";
-import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.14";
-import { PREP_KEY, getPrep, newPrep, startPrepared, runSim, checkEnd, drawArena, simRunning } from "./prep.js?v=0.9.14";
-import { openPrep } from "./ui.js?v=0.9.14";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.16";
+import { describe } from "./combat.js?v=0.9.16";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.16";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending } from "./trainer.js?v=0.9.16";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.16";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.16";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.16";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.16";
+import { runPrepared } from "./prepared.js?v=0.9.16";
+import { loadRules } from "./store.js?v=0.9.16";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.16";
+import { PREP_KEY, getPrep, newPrep, startPrepared, runSim, checkEnd, drawArena, simRunning } from "./prep.js?v=0.9.16";
+import { openPrep } from "./ui.js?v=0.9.16";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -137,7 +137,7 @@ OBR.onReady(() => {
       const rules = await loadRules();
       // (players only resize their own Pokémon)
       const ids = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id)).map((i) => i.id);
-      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.14");
+      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.16");
       const cellM = await cellMeters();
       await OBR.scene.items.updateItems(ids, (ds) => {
         for (const d0 of ds) { const s = d0.metadata[SHEET_KEY]; fitDraft(d0, tokenCells(rules, s.pkmn, cellM), s); }
@@ -156,7 +156,7 @@ OBR.onReady(() => {
     onClick: async (context) => {
       const items = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id));
       try {
-        const { refreshTokens } = await import("./trainer.js?v=0.9.14");
+        const { refreshTokens } = await import("./trainer.js?v=0.9.16");
         const n = await refreshTokens(await loadRules(), items);
         OBR.notification.show(`Atualizado: ${n} token(s)`, "SUCCESS");
       } catch (e) { OBR.notification.show(e.message, "ERROR"); }

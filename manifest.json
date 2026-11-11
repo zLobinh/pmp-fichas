@@ -1,14 +1,14 @@
 {
   "name": "PMP Fichas",
-  "version": "0.9.14",
+  "version": "0.9.16",
   "manifest_version": 1,
   "description": "Fichas do app PMP (Pokedex5E) nos tokens: moves, rolagens contra alvos, HP e PP.",
   "icon": "/pmp-fichas/icons/pokeball.svg",
-  "background_url": "/pmp-fichas/background.html?v=0.9.14",
+  "background_url": "/pmp-fichas/background.html?v=0.9.16",
   "action": {
     "title": "PMP Fichas",
     "icon": "/pmp-fichas/icons/pokeball.svg",
-    "popover": "/pmp-fichas/panel.html?v=0.9.14",
+    "popover": "/pmp-fichas/panel.html?v=0.9.16",
     "width": 380,
     "height": 520
   }

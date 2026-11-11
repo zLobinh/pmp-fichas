@@ -1,7 +1,7 @@
 // Moves whose effect is more than "hit, damage, stage, condition": healing, draining, recoil, fixed
 // damage, dice that double on a condition, variable number of hits, weather/terrain moves, Leech Seed,
 // Taunt & co., Substitute, Stockpile... The texts are the PMP ones (moves.json).
-import { d } from "./rules.js?v=0.9.14";
+import { d } from "./rules.js?v=0.9.16";
 
 const MULTI_TABLE = (n) => (n >= 8 ? 4 : n >= 7 ? 3 : n >= 4 ? 2 : 1); // "D8: 1-3 mais 1 ... 8 mais 4"
 const MINIMIZE_HIT = ["Stomp", "Body Slam", "Dragon Rush", "Flying Press", "Steamroller", "Heavy Slam", "Heat Crash", "Supercell Slam"];
@@ -143,26 +143,17 @@ export function typeFor(sp, move, ctx) {
 // returns { double, halfMore, halve, keepHigh, mult (dice count ×), add (dice), sure, accDelta, notes }
 export function userDice(rules, aSheet, move, sp, ctx) {
   const o = { double: false, halfMore: false, halve: false, keepHigh: false, mult: 1, add: 0, sure: false, accDelta: 0, finalMult: 1, notes: [] };
+  // (weather and terrain on the move's type are damage points now: amp.js FIELD_AMP)
   const w = ctx.field.weather, tr = ctx.field.terrain;
   const t = ctx.type ?? move.type;
-  if (w === "rain" && t === "Water") { o.halfMore = true; o.notes.push("chuva: +½ dos dados de Água"); }
-  if (w === "rain" && (t === "Fire" || sp.solar)) { o.halve = true; o.notes.push("chuva: dados pela metade"); }
-  if (w === "sun" && t === "Fire") { o.halfMore = true; o.notes.push("sol: +½ dos dados de Fogo"); }
-  if (w === "sun" && t === "Water") { o.halve = true; o.notes.push("sol: dados de Água pela metade"); }
-  if (["sand", "hail", "snow"].includes(w) && sp.solar) { o.finalMult *= 0.5; o.notes.push("clima: Solar Beam/Blade pela metade"); }
   if (sp.rainSure && w === "rain") { o.sure = true; o.notes.push("chuva: acerto garantido"); }
   if (sp.rainSure && w === "sun") { o.accDelta -= 2; o.notes.push("sol: −5 no acerto"); }
   if (ctx.grounded) {
-    if (tr === "electric" && t === "Electric") { o.keepHigh = true; o.notes.push("Electric Terrain"); }
-    if (tr === "grassy" && t === "Grass") { o.keepHigh = true; o.notes.push("Grassy Terrain"); }
-    if (tr === "psychic" && t === "Psychic") { o.keepHigh = true; o.notes.push("Psychic Terrain"); }
     if (tr === "electric" && move.name === "Rising Voltage") { o.double = true; o.notes.push("Rising Voltage no Electric Terrain"); }
     if (tr && sp.terrainPulse) { o.double = true; o.notes.push("Terrain Pulse no terreno"); }
     if (tr === "misty" && move.name === "Misty Explosion") { o.groups = 1; o.notes.push("Misty Terrain"); }
   }
   if (tr === "electric" && move.name === "Psyblade") { o.halfMore = true; o.notes.push("Psyblade no Electric Terrain"); }
-  if (tr === "misty" && t === "Dragon") { o.finalMult *= 0.5; o.notes.push("Misty Terrain: Dragão pela metade"); }
-  if (tr === "grassy" && ["Earthquake", "Magnitude", "Bulldoze"].includes(move.name)) { o.finalMult *= 0.5; o.notes.push("Grassy Terrain: pela metade"); }
   if (sp.weatherBall && w) { o.double = true; o.notes.push("Weather Ball no clima"); }
   if (move.name === "Expanding Force" && tr === "psychic") { o.add += 2; o.notes.push("Psychic Terrain: +2 dados"); }
   const b = aSheet.battle ?? {};

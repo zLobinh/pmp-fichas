@@ -1,5 +1,6 @@
 // PMP rules, ported from the app (pokedex/pokemon.lua). Function names follow the Lua ones.
-// Not ported yet: trainer bonuses, held items, ability effects, amplification points, stages, mega.
+// Not ported: trainer bonuses, mega. Amplification points (items, abilities, STAB): amp.js.
+import { moveAmp, damageDice } from "./amp.js?v=0.9.16";
 
 export const ATTRS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };
@@ -199,7 +200,9 @@ export class Rules {
     if (!move) return { name, missing: true };
     const isAttack = move.atk === true || move.auto_hit === true || move.Damage != null || move.Save != null;
     const types = this.types(pkmn);
-    const stab = isAttack && types.includes(move.Type) ? this.stabBonus(pkmn) : 0;
+    // STAB (livro novo / app 1.98): não soma mais dano fixo, é 1 Ponto de Amplificação (rola os dados
+    // 2x e fica com o maior), somado com os outros pontos no combate (amp.js). Aqui só a marca.
+    const stab = isAttack && types.includes(move.Type) && move.Type !== "Typeless" ? 1 : 0;
     const powerMod = this.movePower(pkmn, move, true);
     const out = {
       name,
@@ -237,11 +240,24 @@ export class Rules {
     if (move.Save) out.saveDC = 8 + (powerMod ?? 0) + this.proficiency(pkmn);
     const dmg = move.Damage?.[this.levelIndex(pkmn)];
     if (dmg) {
-      let bonus = stab + (dmg.level ? this.level(pkmn) : 0);
+      let bonus = dmg.level ? this.level(pkmn) : 0;
       const moveMod = dmg.move ? this.movePower(pkmn, move, false) ?? 0 : 0;
       bonus += moveMod;
       out.damage = { amount: dmg.amount, dice: dmg.dice_max, bonus, times: Number(dmg.times) || 1, moveMod };
-      out.damageText = formatDamage(out.damage) + (out.hits ? ` por golpe (${out.hits} ataques)` : "");
+      // the text shows the dice the way the app does: with the points that are always on for this move
+      // (item, abilities without a condition to switch on, STAB, the "Mudanças de Status" points);
+      // weather, terrain and allies only count in the roll itself (combat.js)
+      const pts = moveAmp(this, { pkmn }, this.abilities(pkmn), { name, raw: move, type: out.type, melee: out.rangeInfo.kind === "melee",
+        stab: stab > 0, typeOverridden: false, field: {}, grounded: true, active: () => false });
+      const dd = damageDice({ amount: dmg.amount, sides: dmg.dice_max, amp: pts.amp + (pkmn.damage_amp ?? 0), red: pts.red + (pkmn.damage_red ?? 0),
+        diceMult: pts.diceMult, perThree: pts.perThree, halfProf: Math.max(1, Math.floor(this.proficiency(pkmn) / 2)) });
+      out.points = { amp: dd.amp, red: dd.red, reroll: dd.reroll, halvings: dd.halvings, sources: pts.notes };
+      const times = out.damage.times;
+      const first = formatDamage({ amount: dd.amount, dice: dmg.dice_max, bonus: bonus + dd.flat, times: 1 });
+      const rest = formatDamage({ amount: dd.restAmount, dice: dmg.dice_max, bonus, times: 1 });
+      let text = times > 1 && first !== rest ? `${first} + ${times - 1 > 1 ? `${times - 1}x` : ""}${rest}` : `${times > 1 ? `${times}x` : ""}${first}`;
+      if (dd.halvings) text = `(${text})/${2 ** dd.halvings}`;
+      out.damageText = text + (dd.reroll > 0 ? " (rola 2x, maior)" : dd.reroll < 0 ? " (rola 2x, menor)" : "") + (out.hits ? ` por golpe (${out.hits} ataques)` : "");
     }
     return out;
   }

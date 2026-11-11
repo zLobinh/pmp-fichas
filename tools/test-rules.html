@@ -30,7 +30,7 @@
         level: { caught: 1, current: 20 },
         attributes: { STR: 0, DEX: 0, CON: 0, INT: 0, WIS: 0, CHA: 0, increased: {}, custom: {} },
         nature: "No Nature", feats: [], abilities: [], loyalty: 0,
-        hp: { max: sp.HP - sp["MIN LVL FD"] * conMod, current: 1 },
+        hp: { max: sp.HP - sp["MIN LVL FD"] * conMod, current: 999 },
         moves: { Tackle: { index: 1 }, "Razor Leaf": { index: 2 }, "Acid Spray": { index: 3 }, Struggle: { index: 4 } },
       };
       const checks = [
@@ -40,10 +40,16 @@
         // CD = 8 + (mod DES 1 - 1 do Move Power) + prof 6
         ["Razor Leaf CD", R.moveData(bulba, "Razor Leaf").saveDC, 14],
         ["Acid Spray CD", R.moveData(bulba, "Acid Spray").saveDC, 15],
-        // dano = dados do nível 17 + STAB 5 (se o tipo bate) + mod do atributo sem o modificador
+        // dano = dados do nível 17 + mod do atributo sem o modificador; STAB (livro novo) = 1 Ponto de
+        // Amplificação: rola 2x e fica com o maior, sem dano fixo
         ["Tackle dano", R.moveData(bulba, "Tackle").damageText, "2d10+1"],
-        ["Razor Leaf dano", R.moveData(bulba, "Razor Leaf").damageText, "3d10+6"],
-        ["Acid Spray dano", R.moveData(bulba, "Acid Spray").damageText, "2d10+6"],
+        ["Razor Leaf dano", R.moveData(bulba, "Razor Leaf").damageText, "3d10+1 (rola 2x, maior)"],
+        ["Acid Spray dano", R.moveData(bulba, "Acid Spray").damageText, "2d10+1 (rola 2x, maior)"],
+        // Overgrow com PV abaixo de 1/3: +2 pontos (3 com o STAB): 3d10 -> 4d10 (+1/4 do d10 pelo dado ímpar) e rola 2x
+        ["Razor Leaf com Overgrow", R.moveData({ ...bulba, hp: { ...bulba.hp, current: 1 } }, "Razor Leaf").damageText, "4d10+4 (rola 2x, maior)"],
+        // Charcoal num Move de Fogo sem STAB: 1 ponto; Choice Band em corpo a corpo: 2 pontos (+1 dado a cada 2)
+        ["Tackle com Choice Band", R.moveData({ ...bulba, item: "Choice Band" }, "Tackle").damageText, "3d10+1"],
+        ["Tackle com Life Orb", R.moveData({ ...bulba, item: "Life Orb" }, "Tackle").damageText, "2d10+1 (rola 2x, maior)"],
         ["Struggle dano", R.moveData(bulba, "Struggle").damageText, "4d6+1"],
         ["CA", R.ac(bulba), 13],
         ["Fogo contra Grama/Veneno", R.effectiveness("Fire", bulba), 2],
@@ -51,7 +57,7 @@
       ];
       const rows = checks.map(([n, got, exp]) => `<div class="${got === exp ? "ok" : "no"}">${got === exp ? "✔" : "✘"} ${n}: ${got} (esperado ${exp})</div>`);
       const info = {
-        atributos: R.attributes(bulba), CA: R.ac(bulba), HPmax: R.maxHP(bulba), prof: R.proficiency(bulba), STAB: R.stabBonus(bulba),
+        atributos: R.attributes(bulba), CA: R.ac(bulba), HPmax: R.maxHP(bulba), prof: R.proficiency(bulba), 
         moves: R.moveList(bulba).map((m) => ({ nome: m.label, acerto: m.attackBonus, CD: m.saveDC, dano: m.damageText, pp: `${m.pp}/${m.ppMax}` })),
         "Fire vs Bulbasaur": R.effectiveness("Fire", bulba), "Psychic vs Bulbasaur": R.effectiveness("Psychic", bulba), "Water vs Bulbasaur": R.effectiveness("Water", bulba),
       };
