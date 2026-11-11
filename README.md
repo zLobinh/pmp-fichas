@@ -325,6 +325,12 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   acertam na chuva, Blizzard no granizo, Solar Beam sai na hora no sol, areia/granizo machucam no começo do
   turno, Grassy Terrain cura, Electric Terrain acorda, Misty Terrain bloqueia condições, Psychic Terrain tira a
   ação bônus. Safeguard, Mist e Tailwind valem pros aliados no raio; Trick Room fica registrado.
+- **Pokémon guardados:** na pokébola o token fica preso (attach) no treinador, no mesmo lugar e atrás dele: anda
+  junto com o treinador e não aparece mais como um monte de Pokémon apagados na visão do mestre. Ao liberar, solta
+  e volta pra frente. Os que já estavam guardados de antes são arrumados sozinhos quando o mestre abre a cena.
+  Apagar um treinador leva os Pokémon guardados dele junto (Ctrl+Z traz de volta).
+- **Pokémon sem treinador:** os que ficaram escondidos na pokébola de um treinador apagado aparecem no painel
+  (mestre) com o botão "🧹 Remover N Pokémon sem treinador" (dois cliques).
 - **Reflect, Light Screen e Aurora Veil (livro novo):** ao usar, a ficha rápida pergunta **"Só em mim"** (o escudo
   fica em volta de quem usou e corta o dano pela metade, só pra ele) ou **"Ampliar p/ aliados"** (cobre os
   aliados no raio de 4,5 m / 6 m, mas o corte cai pra 1/3). O escudo fica fixo onde foi criado (quem sai dele

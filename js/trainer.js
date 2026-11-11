@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.17";
-import { d, fmtM } from "./rules.js?v=0.9.17";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.17";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.17";
-import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.17";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.17";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.18";
+import { d, fmtM } from "./rules.js?v=0.9.18";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.18";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.18";
+import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.18";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.18";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -134,7 +134,7 @@ export async function spriteFor(rules, pkmn) {
 // (position, sheet, battle, pokéball, left/right flip). One under an Illusion keeps its disguise and
 // gets the new look saved for when it breaks. Returns how many changed.
 export async function refreshTokens(rules, items, { sprite = true } = {}) {
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.17");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.18");
   const cellM = await cellMeters();
   const plan = [];
   for (const it of items) {
@@ -174,7 +174,7 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.17");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.18");
   const cells = tokenCells(rules, pkmn, await cellMeters());
   const dpi = await OBR.scene.grid.getDpi();
   // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
@@ -197,6 +197,7 @@ export async function createFromCode(rules, trainerItem, code) {
     .disableHit(true)
     .metadata({ [SHEET_KEY]: { pkmn, owner: t.owner, team: t.team, imported: Date.now(), trainer: trainerItem.id, slot, ball: { scale: { x: 1, y: 1 }, layer: "CHARACTER" }, battle: {} } })
     .build();
+  inBallLook(item, trainerItem); // in the ball: on the trainer, behind it
   await OBR.scene.items.addItems([item]);
   const [made] = await OBR.scene.items.getItems([item.id]);
   await pushLog({ kind: "note", attacker: trainerItem.name, text: `guardou ${made.name} na pokébola` });
@@ -243,7 +244,35 @@ async function leaveInitiativeQuiet(item, { pass = true } = {}) {
   await OBR.scene.setMetadata({ "com.pretty-initiative/order": Object.fromEntries(order.map((id, i) => [i, id])) });
 }
 
-// into the ball: hidden, locked and small under the trainer
+// In the ball the token rides on its trainer: attached to it (moves with it; deleting the trainer takes its
+// party along), right on its spot and BEHIND it, so the GM doesn't see a pile of faded Pokémon on the map
+export function inBallLook(dr, trainerItem) {
+  dr.position = { ...trainerItem.position };
+  dr.layer = trainerItem.layer ?? dr.layer;
+  dr.zIndex = (trainerItem.zIndex ?? 0) - 1;
+  dr.attachedTo = trainerItem.id;
+  dr.disableAttachmentBehavior = ["VISIBLE", "SCALE", "ROTATION", "LOCKED", "COPY"];
+}
+// the ones already in the ball from before (loose, on top of the trainer): put them in place (GM, at start)
+export async function tidyStored() {
+  const all = await OBR.scene.items.getItems();
+  const byId = new Map(all.map((i) => [i.id, i]));
+  const fix = all.filter((i) => {
+    const s = i.metadata?.[SHEET_KEY];
+    const t = s?.ball && s.trainer ? byId.get(s.trainer) : null;
+    return t && (i.attachedTo !== t.id || (i.zIndex ?? 0) >= (t.zIndex ?? 0) || i.position.x !== t.position.x || i.position.y !== t.position.y);
+  });
+  if (fix.length) await OBR.scene.items.updateItems(fix.map((i) => i.id), (ds) => { for (const d0 of ds) inBallLook(d0, byId.get(d0.metadata[SHEET_KEY].trainer)); });
+  return fix.length;
+}
+// Pokémon whose trainer was deleted (still hidden in a ball that no longer exists)
+export async function orphans() {
+  const all = await OBR.scene.items.getItems();
+  const ids = new Set(all.map((i) => i.id));
+  return all.filter((i) => { const s = i.metadata?.[SHEET_KEY]; return s?.trainer && !ids.has(s.trainer) && (s.ball || i.visible === false); });
+}
+
+// into the ball: hidden, locked and small behind the trainer
 export async function store(rules, pokemon, trainerItem, { quiet = false, pass = true } = {}) {
   const s0 = getSheet(pokemon);
   if (inBall(s0)) return;
@@ -259,8 +288,8 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
     dr.visible = false;
     dr.locked = true;
     dr.disableHit = true;
-    dr.position = { ...trainerItem.position };
     dr.scale = { x: (dr.scale?.x ?? 1) * BALL_SCALE, y: (dr.scale?.y ?? 1) * BALL_SCALE };
+    inBallLook(dr, trainerItem);
   });
   // an Illusion stuck from before (no saved look): back to its own sprite and name in the ball
   const stuck = (await OBR.scene.items.getItems([pokemon.id]))[0];
@@ -351,6 +380,10 @@ export async function release(rules, pokemon, trainerItem, { pos = null, quiet =
     dr.locked = false;
     dr.disableHit = false;
     dr.position = { ...at };
+    // off the trainer: loose again and in front
+    dr.attachedTo = undefined;
+    dr.disableAttachmentBehavior = undefined;
+    dr.zIndex = Date.now();
     delete s.ball;
     s.battle.move = { used: 0, pos: { ...at } };
   });
@@ -424,7 +457,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.17");
+    const { switchReactions } = await import("./protect.js?v=0.9.18");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -463,7 +496,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.17");
+    const { switchReactions } = await import("./protect.js?v=0.9.18");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }

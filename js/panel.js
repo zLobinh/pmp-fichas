@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.17";
-import { describe } from "./combat.js?v=0.9.17";
-import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.17";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.17";
-import { dicePlusReady } from "./dice.js?v=0.9.17";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.17";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.18";
+import { describe } from "./combat.js?v=0.9.18";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.18";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.18";
+import { dicePlusReady } from "./dice.js?v=0.9.18";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.18";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -21,6 +21,25 @@ function watchLine() {
       return h("span", { class: bad ? "no" : s.ok ? "ok" : "muted", title: s.err ? `último erro: ${s.err}` : "", style: "margin-right:6px" },
         `${n} ${bad ? `✗ ${s.err}` : `✓ (${ago(s.ok)})`}`);
     }));
+}
+
+// Pokémon left hidden in the ball of a trainer that was deleted: one button removes them all
+// (two clicks; Ctrl+Z in Owlbear brings them back)
+function orphanButton() {
+  const list = state.items.filter((i) => { const s = getSheet(i); return s?.trainer && state.ids && !state.ids.has(s.trainer) && (s.ball || i.visible === false); });
+  if (!list.length) return null;
+  return h("div", { style: "margin-top:8px" },
+    h("button", {
+      class: "small",
+      title: `Sem treinador: ${list.map((i) => i.name).join(", ")}`,
+      onclick: async () => {
+        if (!state.sureOrphans) { state.sureOrphans = true; render(); setTimeout(() => { state.sureOrphans = false; render(); }, 4000); return; }
+        state.sureOrphans = false;
+        await OBR.scene.items.deleteItems(list.map((i) => i.id));
+        OBR.notification.show(`${list.length} Pokémon sem treinador removido(s).`, "SUCCESS");
+      },
+    }, state.sureOrphans ? `Clique de novo pra apagar ${list.length}` : `🧹 Remover ${list.length} Pokémon sem treinador`),
+    h("div", { class: "small muted" }, `Escondidos na pokébola de um treinador que foi apagado: ${list.map((i) => i.name).join(", ")}`));
 }
 
 const root = document.getElementById("root");
@@ -113,7 +132,8 @@ function render() {
                   OBR.notification.show("Combate encerrado: estágios zerados e condições voláteis removidas.", "SUCCESS");
                 },
               }, "🏁 Encerrar combate")
-            : null)
+            : null,
+          orphanButton())
       : null,
     h("div", { class: "card small muted" },
       h("h2", {}, "Como usar"),
@@ -132,7 +152,9 @@ OBR.onReady(async () => {
   dicePlusReady().then((ok) => { state.dicePlus = ok; render(); });
   const load = async () => {
     if (!(await OBR.scene.isReady())) { state.items = []; state.log = []; return render(); }
-    state.items = await OBR.scene.items.getItems((i) => i.metadata[SHEET_KEY] != null);
+    const everything = await OBR.scene.items.getItems();
+    state.ids = new Set(everything.map((i) => i.id));
+    state.items = everything.filter((i) => i.metadata[SHEET_KEY] != null);
     const meta = await OBR.scene.getMetadata();
     state.log = meta[LOG_KEY] ?? [];
     state.prep = meta[`${ID}/prep`] ?? null;
@@ -140,7 +162,7 @@ OBR.onReady(async () => {
   };
   await load();
   OBR.scene.onReadyChange(load);
-  OBR.scene.items.onChange((items) => { state.items = items.filter((i) => i.metadata[SHEET_KEY] != null); render(); });
+  OBR.scene.items.onChange((items) => { state.ids = new Set(items.map((i) => i.id)); state.items = items.filter((i) => i.metadata[SHEET_KEY] != null); render(); });
   OBR.scene.onMetadataChange((meta) => { state.log = meta[LOG_KEY] ?? []; state.prep = meta[`${ID}/prep`] ?? null; render(); });
   OBR.room.onMetadataChange(async () => { state.settings = await getSettings(); render(); });
 });

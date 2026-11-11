@@ -9,7 +9,7 @@
 //   - an area with a duration joins Pretty Sordid right after its user, "Sunny Day (5)": on its turn
 //     the count goes down (areaTurn) and at 0 it disappears. Out of combat it runs out by the round.
 // Trick Room has no area: it stays in the scene metadata (FIELD_KEY).
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.17";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, asset } from "./store.js?v=0.9.18";
 
 export const FIELD_KEY = "com.pmp-fichas/field";
 export const AREA_KEY = `${ID}/area`;
