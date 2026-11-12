@@ -10,10 +10,10 @@
 //   3. no answer in time = no defense.
 // Defending costs the reaction, the action of the next turn and 1 PP. Used in a row (the round
 // before), the book's rule: 1d6 per consecutive success (max 6d6), all of them 5 or 6.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.19";
-import { fmtM } from "./rules.js?v=0.9.19";
-import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.19";
-import { distanceMeters } from "./map.js?v=0.9.19";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.20";
+import { fmtM } from "./rules.js?v=0.9.20";
+import { CONDITIONS, conditionsOf, econOf, inInitiative, allies, giveCondition, addStage, STAGES } from "./battle.js?v=0.9.20";
+import { distanceMeters } from "./map.js?v=0.9.20";
 
 // kind: what the protection covers
 //   single       any single-target move aimed at the user

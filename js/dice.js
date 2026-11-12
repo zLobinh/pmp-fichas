@@ -1,7 +1,7 @@
 // Rolls go through Dice+ (3D dice on everyone's screen) when it is in the room,
 // otherwise through our own dice. Protocol: https://extensions.owlbear.rodeo/dice-plus
-import { OBR, ID } from "./store.js?v=0.9.19";
-import { d, rollDice } from "./rules.js?v=0.9.19";
+import { OBR, ID } from "./store.js?v=0.9.20";
+import { d, rollDice } from "./rules.js?v=0.9.20";
 
 const SOURCE = ID; // results come back on `${SOURCE}/roll-result`
 const pending = new Map();
@@ -73,7 +73,7 @@ export async function getRoller({ useDicePlus = true, showResults = true, names 
   if (names !== undefined) diceNames = names;
   else {
     try {
-      const { getSettings } = await import("./store.js?v=0.9.19");
+      const { getSettings } = await import("./store.js?v=0.9.20");
       const s = await getSettings();
       diceNames = s.coloredDice ? { hit: s.diceHit || "Acerto", dmg: s.diceDmg || "Dano", extra: s.diceExtra || "Extra" } : null;
     } catch { diceNames = null; }

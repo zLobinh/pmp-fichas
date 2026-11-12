@@ -25,6 +25,33 @@ def load(path):
     return json.loads(Path(path).read_text(encoding="utf-8"), strict=False)
 
 
+def lua_table_to_json(text):
+    """The M.megas = { ... } table of pokedex/megadex.lua as a dict (plain data: strings, numbers, tables)."""
+    import re
+    start = text.index("M.megas = {") + len("M.megas = ")
+    depth, i = 0, start
+    while True:  # the matching closing brace
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        elif c == '"':
+            i = text.index('"', i + 1)
+        i += 1
+    body = text[start:i + 1]
+    body = re.sub(r"--[^\n]*", "", body)                       # comments
+    body = re.sub(r'\[\s*"([^"]+)"\s*\]\s*=', r'"\1":', body)  # ["X"] =
+    body = re.sub(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=", r'"\1":', body)  # key =
+    # { "a", "b" } with no keys inside -> [ ]
+    body = re.sub(r"\{(\s*(?:\"[^\"]*\"|-?\d+(?:\.\d+)?)\s*(?:,\s*(?:\"[^\"]*\"|-?\d+(?:\.\d+)?)\s*)*,?\s*)\}", r"[\1]", body)
+    body = re.sub(r",(\s*[}\]])", r"\1", body)                  # trailing commas
+    body = body.replace("true", "true").replace("nil", "null")
+    return json.loads(body)
+
+
 def main():
     app = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_APP
     data = app / "p5e-data" / "data"
@@ -48,6 +75,8 @@ def main():
         "feats": {k: v.get("Description", "") for k, v in load(app / "assets" / "datafiles" / "feats.json").items()},
         "abilities": {k: (v.get("Description", "") if isinstance(v, dict) else str(v))
                       for k, v in load(data / "abilities.json").items()},
+        # Mega Evoluções (pokedex/megadex.lua): atributos, CA, deslocamento, habilidade, tipos, variantes X/Y
+        "megas": lua_table_to_json((app / "pokedex" / "megadex.lua").read_text(encoding="utf-8")),
     }
 
     for name, obj in (("moves", moves), ("pokemon", pokemon), ("rules", rules)):

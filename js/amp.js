@@ -2,7 +2,7 @@
 // pokedex/items.lua M.amplification, pokedex/abilitydex.lua M.amplification e pokemon.lua
 // get_damage_mod_stab. Tudo vira PONTOS que se somam (STAB = 1 ponto; Adaptability troca esse ponto
 // pelos 2 dela), e só depois os pontos viram efeito:
-//   0,5 sozinho  -> + metade da proficiência (mínimo 1)
+//   meio ponto   -> + metade da proficiência (mínimo 1), sempre (1,5 = rerrolagem + ½ prof.)
 //   ponto ímpar  -> rola os dados 2x e fica com o maior (rerrolagem)
 //   cada 2       -> +1 dado a cada 2 dados (sobrou 1 dado: +¼ do dado, pra cima)
 // Redução: 0,5 -> − metade da proficiência; ímpar -> rola 2x e fica com o menor; cada 2 -> dano final ÷2.
@@ -14,7 +14,7 @@
 // sound, recoil, nameContains, typeOverride, stab, technician, condition, diceMult, perThree,
 // species (só nessas espécies), when (ativável: a extensão decide pelo campo/aliados/estado; o
 // "ATIVAR" do app, pkmn.activated_effects, também liga).
-import { SLICING, BITING, isSound, isRecoil } from "./abilities.js?v=0.9.19";
+import { SLICING, BITING, isSound, isRecoil } from "./abilities.js?v=0.9.20";
 
 const TYPE_ITEMS = {
   "Black Belt": "Fighting", "Black Glasses": "Dark", Charcoal: "Fire", "Dragon Fang": "Dragon", "Fairy Feather": "Fairy",
@@ -171,6 +171,8 @@ export function moveAmp(rules, sheet, abilities, ctx) {
       add(e, e.diceMult ? `${ab} (dados ×${String(e.diceMult).replace(".", ",")})` : e.reduction ? `${ab} (Redução ${e.points})` : `${ab} (${e.points} pt)`);
     }
   }
+  // Mega Evolução ativa: 1 ponto em todos os Moves (app 1.98)
+  if (pk.is_mega) { out.amp += 1; out.notes.push("Mega Evolução (1 pt)"); }
   // STAB: 1 ponto (Adaptability troca pelos 2 dela, acima)
   if (ctx.stab && !abilities.includes("Adaptability")) out.amp += 1;
   // clima e terreno onde o atacante está (os terrenos só pra quem está no chão)
@@ -185,7 +187,8 @@ export function summary(amp, red) {
   const clamp = (v) => Math.max(0, Math.min(20, Math.round((v || 0) * 2) / 2));
   amp = clamp(amp); red = clamp(red);
   const a = Math.floor(amp), r = Math.floor(red);
-  return { amp, red, ampGroups: Math.floor(a / 2), ampReroll: a % 2 === 1, ampFlat: amp === 0.5, redHalvings: Math.floor(r / 2), redReroll: r % 2 === 1, redFlat: red === 0.5 };
+  // the half point always adds its effect now (1,5 = rerolagem + ½ prof.), not only when it's alone
+  return { amp, red, ampGroups: Math.floor(a / 2), ampReroll: a % 2 === 1, ampFlat: amp - a === 0.5, redHalvings: Math.floor(r / 2), redReroll: r % 2 === 1, redFlat: red - r === 0.5 };
 }
 // each group of 2 points: +1 die per 2; an odd die left over: +1/4 of its max (rounded up)
 export function amplifyDice(amount, sides, groups) {

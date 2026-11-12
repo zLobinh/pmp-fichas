@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.19";
-import { d } from "./rules.js?v=0.9.19";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.19";
-import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.19";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.19";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.20";
+import { d } from "./rules.js?v=0.9.20";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.20";
+import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.20";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.20";
 
 // ------------------------------------------------------------------ conditions
 
@@ -521,7 +521,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.19");
+    const { distanceMeters } = await import("./map.js?v=0.9.20");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
@@ -633,7 +633,7 @@ export async function floatHp(itemId, before) {
   const [it] = await OBR.scene.items.getItems([itemId]);
   const now = getSheet(it)?.pkmn?.hp?.current;
   if (now == null || now === before) return;
-  const { FX_CHANNEL } = await import("./map.js?v=0.9.19");
+  const { FX_CHANNEL } = await import("./map.js?v=0.9.20");
   const text = now < before ? `-${before - now}` : `+${now - before}`;
   await OBR.broadcast.sendMessage(FX_CHANNEL, { from: it.position, hits: [{ to: it.position, kind: now < before ? "hit" : "heal", text }] }, { destination: "ALL" }).catch(() => {});
 }
@@ -778,8 +778,8 @@ export function setPoints(pkmn, key, value) {
 export function pointsSummary(amp, red) {
   const a = Math.floor(amp), r = Math.floor(red);
   return {
-    ampGroups: Math.floor(a / 2), ampReroll: a % 2 === 1, ampFlat: amp === 0.5,
-    redHalvings: Math.floor(r / 2), redReroll: r % 2 === 1, redFlat: red === 0.5,
+    ampGroups: Math.floor(a / 2), ampReroll: a % 2 === 1, ampFlat: amp - a === 0.5,
+    redHalvings: Math.floor(r / 2), redReroll: r % 2 === 1, redFlat: red - r === 0.5,
   };
 }
 // each group of 2 points: +1 die for every 2; an odd die left over gives +1/4 of its max (rounded up)

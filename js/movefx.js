@@ -1,7 +1,7 @@
 // Moves whose effect is more than "hit, damage, stage, condition": healing, draining, recoil, fixed
 // damage, dice that double on a condition, variable number of hits, weather/terrain moves, Leech Seed,
 // Taunt & co., Substitute, Stockpile... The texts are the PMP ones (moves.json).
-import { d } from "./rules.js?v=0.9.19";
+import { d } from "./rules.js?v=0.9.20";
 
 const MULTI_TABLE = (n) => (n >= 8 ? 4 : n >= 7 ? 3 : n >= 4 ? 2 : 1); // "D8: 1-3 mais 1 ... 8 mais 4"
 const MINIMIZE_HIT = ["Stomp", "Body Slam", "Dragon Rush", "Flying Press", "Steamroller", "Heavy Slam", "Heat Crash", "Supercell Slam"];

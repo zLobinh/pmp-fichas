@@ -1,18 +1,19 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.19";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.19";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.19";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.20";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.20";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.20";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.19";
-import { rollPending } from "./trainer.js?v=0.9.19";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.19";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.19";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.19";
-import { runPrepared } from "./prepared.js?v=0.9.19";
-import { fieldNow, fieldText } from "./field.js?v=0.9.19";
-import { seesTarget } from "./combat.js?v=0.9.19";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.19";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.20";
+import { rollPending } from "./trainer.js?v=0.9.20";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.20";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.20";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.20";
+import { runPrepared } from "./prepared.js?v=0.9.20";
+import { megaOptions, megaEvolve, megaRevert } from "./mega.js?v=0.9.20";
+import { fieldNow, fieldText } from "./field.js?v=0.9.20";
+import { seesTarget } from "./combat.js?v=0.9.20";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.20";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -133,6 +134,7 @@ function hpBlock(pkmn) {
       h("button", { class: "small", onclick: apply((p, n) => { const t = Math.min(p.hp.temp ?? 0, n); p.hp.temp = (p.hp.temp ?? 0) - t; p.hp.current = Math.max(0, p.hp.current - (n - t)); }) }, "Dano"),
       h("button", { class: "small", onclick: apply((p, n) => { p.hp.current = Math.min(rules.maxHP(p), p.hp.current + n); }) }, "Curar"),
       h("span", { class: "spacer" })),
+    megaControl(pkmn),
     Object.keys(cond).length || stages.length || sheet.battle?.helped || ampPoints(pkmn) || redPoints(pkmn)
       ? h("div", { class: "row", style: "margin-top:4px;gap:4px" },
           sheet.battle?.helped ? h("span", { class: "chip up", title: "Vale só pro próximo ataque (ou até o fim da rodada)" }, `🤝 Helping Hand de ${sheet.battle.helped.by}`) : null,
@@ -141,6 +143,37 @@ function hpBlock(pkmn) {
           ampPoints(pkmn) ? h("span", { class: "chip up" }, `Amp ${String(ampPoints(pkmn)).replace(".", ",")}`) : null,
           redPoints(pkmn) ? h("span", { class: "chip down" }, `Red ${String(redPoints(pkmn)).replace(".", ",")}`) : null)
       : null);
+}
+
+// ✨ Mega Evolução: ativa (escolhendo X/Y e o atributo do bônus, quando a Mega tem) / desativa
+function megaControl(pkmn) {
+  const rules = state.rules;
+  const opts = megaOptions(rules, pkmn);
+  if (!opts) return null;
+  const run = (fn) => async () => {
+    state.busy = true; render();
+    try { await fn(); } catch (e) { OBR.notification.show(e.message, "WARNING"); }
+    state.busy = false; state.item = await getItem(state.attackerId); render();
+  };
+  if (pkmn.is_mega) {
+    const md = rules.activeMega(pkmn);
+    return h("div", { class: "row small", style: "margin-top:4px;gap:6px" },
+      h("span", { class: "chip up", title: `Habilidade: ${md?.ability ?? "—"} · CA ${md?.ac_bonus ? `+${md.ac_bonus}` : "+0"}${md?.speed_bonus ? ` · deslocamento +${(md.speed_bonus / 5) * 1.5} m` : ""} · 1 ponto de Amplificação em todo Move` },
+        `✨ Mega${pkmn.mega_variant && !/padr/i.test(pkmn.mega_variant) ? ` ${pkmn.mega_variant}` : ""}${md?.ability ? ` · ${md.ability}` : ""}`),
+      h("span", { class: "spacer" }),
+      h("button", { class: "small", disabled: state.busy, onclick: run(() => megaRevert(rules, state.item)) }, "Desfazer Mega"));
+  }
+  const variant = opts.variants ? (opts.variants.includes(state.megaVariant) ? state.megaVariant : opts.variants[0]) : null;
+  const choice = opts.choice(variant);
+  const pick = choice ? (choice.options.includes(state.megaChoice) ? state.megaChoice : choice.options[0]) : null;
+  return h("div", { class: "row small", style: "margin-top:4px;gap:6px;flex-wrap:wrap" },
+    opts.variants ? h("select", { title: "Qual Mega", onchange: (e) => { state.megaVariant = e.target.value; render(); } },
+      opts.variants.map((v) => h("option", { value: v, selected: v === variant }, /padr/i.test(v) ? "Padrão" : `Mega ${v}`))) : null,
+    choice ? h("select", { title: `Bônus de +${choice.bonus} em`, onchange: (e) => { state.megaChoice = e.target.value; } },
+      choice.options.map((o) => h("option", { value: o, selected: o === pick }, `+${choice.bonus} ${ATTR_PT[o] ?? o}`))) : null,
+    h("span", { class: "spacer" }),
+    h("button", { class: "small primary", disabled: state.busy, title: "Atributos, CA, deslocamento, tipos e habilidade da Mega; +1 ponto de Amplificação em todo Move",
+      onclick: run(async () => { const r = await megaEvolve(rules, state.item, { variant, choice: pick }); if (r?.notes?.length) OBR.notification.show(r.notes.join(" · "), "INFO"); }) }, "✨ Mega Evoluir"));
 }
 
 function condTip(key, v) {

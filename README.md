@@ -325,6 +325,15 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   acertam na chuva, Blizzard no granizo, Solar Beam sai na hora no sol, areia/granizo machucam no começo do
   turno, Grassy Terrain cura, Electric Terrain acorda, Misty Terrain bloqueia condições, Psychic Terrain tira a
   ação bônus. Safeguard, Mist e Tailwind valem pros aliados no raio; Trick Room fica registrado.
+- **Mega Evolução (mega.js):** na ficha rápida dos Pokémon que têm Mega aparece "✨ Mega Evoluir" (com a escolha
+  de X/Y e, nas Megas que deixam escolher, de onde vai o bônus, como a Beedrill). Ativa, valem os atributos, a CA,
+  o deslocamento (e o voo que algumas ganham), os tipos e a habilidade da Mega (megadex do app, em
+  `data/rules.json`), +1 Ponto de Amplificação em todo Move, o token troca pro sprite da Mega e a habilidade nova
+  entra em campo (Drought, Intimidate...). "Desfazer Mega" volta ao normal; voltar pra pokébola ou "Encerrar
+  combate" também acaba com a Mega. Zygarde troca Core Enforcer por Nihil Light, como no app.
+- **Livro novo (app 1.98+):** os Moves de status agora forçam teste de resistência com CD = número do texto + MOVE
+  (campo "Save DC Base", sem proficiência), e o meio ponto de Amplificação/Redução sempre soma o efeito dele
+  (½ proficiência), mesmo junto de outros pontos (1,5 = rerrolagem + ½ prof.). Os G-Max saíram dos dados.
 - **Pokémon guardados:** na pokébola o token fica preso (attach) no treinador, no mesmo lugar e atrás dele: anda
   junto com o treinador e não aparece mais como um monte de Pokémon apagados na visão do mestre. Ao liberar, solta
   e volta pra frente. Os que já estavam guardados de antes são arrumados sozinhos quando o mestre abre a cena.

@@ -1,6 +1,6 @@
 // PMP rules, ported from the app (pokedex/pokemon.lua). Function names follow the Lua ones.
 // Not ported: trainer bonuses, mega. Amplification points (items, abilities, STAB): amp.js.
-import { moveAmp, damageDice } from "./amp.js?v=0.9.19";
+import { moveAmp, damageDice } from "./amp.js?v=0.9.20";
 
 export const ATTRS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };
@@ -63,7 +63,19 @@ export class Rules {
     this.natures = rules.natures;
     this.featText = rules.feats ?? {};
     this.abilityText = rules.abilities ?? {};
+    this.megas = rules.megas ?? {};
   }
+
+  // ---- Mega Evolução (pokedex/megadex.lua). pkmn.is_mega / mega_variant ("X", "Y"...) / mega_choice ("STR"...)
+  megaOf(pkmn) { return this.megas[pkmn?.species?.current] ?? null; }
+  // the data of this Mega (the variant chosen, or "PADRÃO", or X — like megadex.get_mega_data)
+  megaData(pkmn, variant = pkmn?.mega_variant) {
+    const d = this.megaOf(pkmn);
+    if (!d) return null;
+    if (!d.variants) return d;
+    return d.variants[variant] ?? d.variants["PADRÃO"] ?? d.variants.X ?? Object.values(d.variants)[0] ?? null;
+  }
+  activeMega(pkmn) { return pkmn?.is_mega ? this.megaData(pkmn) : null; }
 
   // pokedex.get_pokemon: species data with the variant's overrides applied
   speciesData(pkmn) {
@@ -80,8 +92,9 @@ export class Rules {
   feats(pkmn) { return pkmn.feats ?? []; }
   featCount(pkmn, feat) { return this.feats(pkmn).filter((f) => f === feat).length; }
   nature(pkmn) { return this.natures[pkmn.nature] ?? this.natures["No Nature"] ?? {}; }
-  types(pkmn) { return pkmn.ability_active_type ? [pkmn.ability_active_type] : this.speciesData(pkmn)?.Type ?? ["Typeless"]; }
-  abilities(pkmn) { return pkmn.abilities?.length ? pkmn.abilities : this.speciesData(pkmn)?.Abilities ?? []; }
+  types(pkmn) { return pkmn.ability_active_type ? [pkmn.ability_active_type] : this.activeMega(pkmn)?.types ?? this.speciesData(pkmn)?.Type ?? ["Typeless"]; }
+  // a Mega has its own (single) ability
+  abilities(pkmn) { const m = this.activeMega(pkmn)?.ability; return m ? [m] : pkmn.abilities?.length ? pkmn.abilities : this.speciesData(pkmn)?.Abilities ?? []; }
   name(pkmn) { return pkmn.nickname || pkmn.species?.current || "?"; }
 
   // M.get_attributes (without trainer, mega and active-ability effects)
@@ -94,6 +107,12 @@ export class Rules {
       pre[k] = (base[k] ?? 10) + (a[k] ?? 0) + (nat[k] ?? 0) + (a.increased?.[k] ?? 0) + (a.custom?.[k] ?? 0);
     }
     for (const f of this.feats(pkmn)) if (FEAT_TO_ATTRIBUTE[f]) pre[FEAT_TO_ATTRIBUTE[f]] += 1;
+    // Mega: its fixed attributes + the one the player chose (Mega Beedrill: +6 in FOR or DES), before the vitamins
+    const mega = this.activeMega(pkmn);
+    if (mega) {
+      for (const k of ATTRS) pre[k] += mega.attributes?.[k] ?? 0;
+      if (mega.choice && pkmn.mega_choice && pre[pkmn.mega_choice] != null) pre[pkmn.mega_choice] += mega.choice.bonus ?? 0;
+    }
     const vit = pkmn.vitamins?.attributes ?? {};
     const out = {};
     for (const k of ATTRS) {
@@ -117,7 +136,7 @@ export class Rules {
 
   // M.get_AC (without items, stages, mega and abilities)
   ac(pkmn) {
-    return (this.speciesData(pkmn)?.AC ?? 10) + (this.nature(pkmn).AC ?? 0) + this.featCount(pkmn, "Aumento de CA");
+    return (this.speciesData(pkmn)?.AC ?? 10) + (this.nature(pkmn).AC ?? 0) + this.featCount(pkmn, "Aumento de CA") + (this.activeMega(pkmn)?.ac_bonus ?? 0);
   }
 
   // M.get_saving_throw_modifier
@@ -135,9 +154,12 @@ export class Rules {
   // "Mobilidade" feat: +3 m. Items/abilities not included.
   speeds(pkmn) {
     const sp = this.speciesData(pkmn) ?? {};
-    const extra = (pkmn.stages?.Speed ?? 0) * 5 + (this.featCount(pkmn, "Mobilidade") ? 10 : 0);
+    const mega = this.activeMega(pkmn);
+    const extra = (pkmn.stages?.Speed ?? 0) * 5 + (this.featCount(pkmn, "Mobilidade") ? 10 : 0) + (mega?.speed_bonus ?? 0);
     const m = (ft) => (ft ? Math.max(0, ((ft + extra) / 5) * 1.5) : 0);
-    return { walk: m(sp.WSp), fly: m(sp.Fsp), swim: m(sp.Ssp), climb: m(sp["Climbing Speed"]), burrow: m(sp["Burrowing Speed"]) };
+    // Mega Pinsir & co.: "voo igual à caminhada"
+    const gain = (k) => { const g = mega?.gained_speeds?.[k]; return g === "Walking" ? sp.WSp ?? 0 : typeof g === "number" ? g : 0; };
+    return { walk: m(sp.WSp), fly: m(Math.max(sp.Fsp ?? 0, gain("Flying"))), swim: m(Math.max(sp.Ssp ?? 0, gain("Swimming"))), climb: m(sp["Climbing Speed"]), burrow: m(sp["Burrowing Speed"]) };
   }
 
   // size category: 0 Miúdo, 1 Pequeno, 2 Médio, 3 Grande, 4 Enorme, 5 Imenso
@@ -237,7 +259,9 @@ export class Rules {
     if (move.atk !== true && !many && move.Damage && !move.Save
       && /acerto garantido|garantid[oa] de acertar|imposs[íi]vel (para ela |de )?desviar|n[ãa]o (pode|consegue) errar|sempre acerta/i.test(desc)) out.sureHit = true;
     if ((move.atk === true || many) && !move.autohit) out.attackBonus = (powerMod ?? 0) + this.proficiency(pkmn);
-    if (move.Save) out.saveDC = 8 + (powerMod ?? 0) + this.proficiency(pkmn);
+    // status moves of the new book: "CD igual a 17 + MOVE" (no proficiency) -> "Save DC Base"
+    const dcBase = Number(move["Save DC Base"]);
+    if (move.Save) out.saveDC = Number.isFinite(dcBase) && move["Save DC Base"] != null ? dcBase + (powerMod ?? 0) : 8 + (powerMod ?? 0) + this.proficiency(pkmn);
     const dmg = move.Damage?.[this.levelIndex(pkmn)];
     if (dmg) {
       let bonus = dmg.level ? this.level(pkmn) : 0;

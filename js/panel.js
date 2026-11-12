@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.19";
-import { describe } from "./combat.js?v=0.9.19";
-import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.19";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.19";
-import { dicePlusReady } from "./dice.js?v=0.9.19";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.19";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.20";
+import { describe } from "./combat.js?v=0.9.20";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.20";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.20";
+import { dicePlusReady } from "./dice.js?v=0.9.20";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.20";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -126,7 +126,10 @@ function render() {
                 title: "Zera estágios e ações, acaba Confuso/Atordoado/Encantado/Sonolento e Gravemente Envenenado vira Envenenado",
                 onclick: async (ev) => {
                   ev.target.disabled = true;
-                  await endCombat(withSheet);
+                  // the Megas end with the fight
+                  const { megaRevert } = await import("./mega.js?v=0.9.20");
+                  for (const i of withSheet) if (getSheet(i)?.pkmn?.is_mega) await megaRevert(rules, i).catch(() => {});
+                  await endCombat(await OBR.scene.items.getItems(withSheet.map((i) => i.id)));
                   await OBR.scene.setMetadata({ "com.pmp-fichas/turn": null });
                   ev.target.disabled = false;
                   OBR.notification.show("Combate encerrado: estágios zerados e condições voláteis removidas.", "SUCCESS");
