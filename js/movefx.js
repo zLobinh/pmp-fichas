@@ -1,7 +1,7 @@
 // Moves whose effect is more than "hit, damage, stage, condition": healing, draining, recoil, fixed
 // damage, dice that double on a condition, variable number of hits, weather/terrain moves, Leech Seed,
 // Taunt & co., Substitute, Stockpile... The texts are the PMP ones (moves.json).
-import { d } from "./rules.js?v=0.9.18";
+import { d } from "./rules.js?v=0.9.19";
 
 const MULTI_TABLE = (n) => (n >= 8 ? 4 : n >= 7 ? 3 : n >= 4 ? 2 : 1); // "D8: 1-3 mais 1 ... 8 mais 4"
 const MINIMIZE_HIT = ["Stomp", "Body Slam", "Dragon Rush", "Flying Press", "Steamroller", "Heavy Slam", "Heat Crash", "Supercell Slam"];
@@ -125,6 +125,68 @@ export function restricted(rules, aSheet, name, raw, ctx = {}) {
   if (r.healBlock && special(name, raw).heal) return "Heal Block: não pode usar Moves de cura.";
   if (ctx.damp && ["Self-Destruct", "Explosion", "Mind Blown", "Misty Explosion"].includes(name)) return `${ctx.damp} (Damp) impede explosões.`;
   return null;
+}
+
+// What the move's own text asks before it can be used (Last Resort, Fake Out, Sleep Talk, Dream Eater...).
+// ctx: { round, terrain, targets: [sheets] }. Returns the reason it can't, or null. (GM: "vai mesmo assim")
+export const SLEEP_MOVES = ["Sleep Talk", "Snore"];
+export const TYPE_SPENT = { "Double Shock": "Electric", "Burn Up": "Fire" };
+export function requirement(rules, aSheet, name, raw, ctx = {}) {
+  const b = aSheet.battle ?? {};
+  const pk = aSheet.pkmn;
+  const used = b.used ?? [];
+  const cond = b.cond ?? {};
+  const max = Math.max(1, rules.maxHP(pk)), hp = pk.hp.current;
+  const targets = ctx.targets ?? [];
+  const item = !b.itemLost ? pk.item ?? "" : "";
+  switch (name) {
+    case "Last Resort": {
+      const others = Object.keys(pk.moves ?? {}).filter((m) => m !== name && m !== "Struggle");
+      const missing = others.filter((m) => !used.includes(m));
+      if (!others.length) return "Last Resort: precisa conhecer outros Moves.";
+      if (missing.length) return `Last Resort: falta usar ${missing.map((m) => rules.moveData(pk, m).label.replace(/ PMP$/, "")).join(", ")} neste combate.`;
+      return null;
+    }
+    case "Fake Out":
+      return used.length ? "Fake Out: só pode ser o primeiro Move do Pokémon no combate." : null;
+    case "First Impression":
+    case "Mat Block":
+      return used.length && b.firstRound !== ctx.round ? `${name}: só no primeiro turno em que o Pokémon age no combate.` : null;
+    case "Sleep Talk":
+    case "Snore":
+      return cond.Asleep ? null : `${name}: só pode ser usado dormindo.`;
+    case "Dream Eater":
+      return targets.length && !targets.every((t) => t.battle?.cond?.Asleep || t.battle?.cond?.Drowsy) ? "Dream Eater: o alvo precisa estar Sonolento ou Dormindo." : null;
+    case "Nightmare":
+      return targets.length && !targets.every((t) => t.battle?.cond?.Asleep) ? "Nightmare: o alvo precisa estar Dormindo." : null;
+    case "Blood Moon":
+    case "Gigaton Hammer":
+      return b.lastMove === name && b.lastMoveRound === (ctx.round ?? 0) - 1 && !b.lastMissed ? `${name}: não pode em turnos seguidos (só se o anterior errou).` : null;
+    case "Double Shock":
+    case "Burn Up": {
+      const t = TYPE_SPENT[name];
+      return rules.types(pk).includes(t) ? null : `${name}: o usuário precisa ser do tipo ${t === "Electric" ? "Elétrico" : "Fogo"} (perdeu o tipo ao usar antes).`;
+    }
+    case "Belly Drum":
+      if (hp < max / 2) return "Belly Drum: precisa de pelo menos metade da vida.";
+      return (pk.stages?.Attack ?? 0) >= 6 ? "Belly Drum: o Ataque já está no máximo (+6)." : null;
+    case "Fillet Away":
+      return hp <= Math.max(4, 2 * rules.level(pk)) ? "Fillet Away: a vida atual é menor que o custo." : null;
+    case "Substitute":
+      if (b.sub) return "Substitute: já tem um Substitute ativo.";
+      return hp <= Math.floor(max / 4) ? "Substitute: precisa de mais de 25% da vida." : null;
+    case "Poltergeist":
+      return targets.length && targets.every((t) => !t.pkmn?.item || t.battle?.itemLost) ? "Poltergeist: o alvo não está segurando item." : null;
+    case "Stuff Cheeks":
+      return /berry/i.test(item) ? null : "Stuff Cheeks: precisa estar segurando uma Berry.";
+    case "Belch":
+      return b.ateBerry ? null : "Belch: o Pokémon precisa ter comido uma Berry nesta batalha (Stuff Cheeks marca isso).";
+    case "Spit Up":
+    case "Swallow":
+      return (b.stockpile ?? 0) > 0 ? null : `${name}: precisa usar Stockpile antes.`;
+    default:
+      return null;
+  }
 }
 
 // the move's type for this use (Hidden Power, Weather Ball, Terrain Pulse)

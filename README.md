@@ -335,7 +335,16 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   fica em volta de quem usou e corta o dano pela metade, só pra ele) ou **"Ampliar p/ aliados"** (cobre os
   aliados no raio de 4,5 m / 6 m, mas o corte cai pra 1/3). O escudo fica fixo onde foi criado (quem sai dele
   perde a proteção), não vale contra crítico e Aurora não se soma com Reflect/Light Screen: vale o melhor.
-  Na simulação, a IA amplia quando tem aliado dentro do raio.
+  Na simulação, a IA amplia quando tem aliado dentro do raio. Vale contra qualquer ataque (não só de inimigo), e
+  quando não vale o golpe diz o porquê (crítico, Infiltrator, ou Reflect contra ataque à distância).
+- **Moves com requisito (movefx.js `requirement`):** Last Resort (depois de usar todos os outros Moves no combate;
+  zera ao trocar), Fake Out (primeiro Move do Pokémon no combate), First Impression / Mat Block (primeiro turno em
+  que age), Sleep Talk / Snore (só dormindo; e funcionam dormindo), Dream Eater (alvo Sonolento ou Dormindo),
+  Nightmare (alvo Dormindo), Blood Moon / Gigaton Hammer (não em turnos seguidos, a não ser que o anterior tenha
+  errado), Double Shock / Burn Up (precisa do tipo e perde o tipo até trocar ou o combate acabar), Belly Drum,
+  Fillet Away e Substitute (vida suficiente), Poltergeist (alvo com item), Stuff Cheeks (segurando Berry; come a
+  Berry e libera o Belch), Belch, Spit Up / Swallow (Stockpile antes), Steel Roller (terreno). Quando bloqueia, o
+  mestre ainda pode usar ("vai mesmo assim").
 - **Moves especiais (movefx.js):** cura (Recover, Roost, Moonlight pela tabela do clima, Rest, Wish, Heal
   Pulse, Swallow), dreno (Giga Drain, Drain Punch...), recuo (Double-Edge, Brave Bird...), erro que machuca
   (Jump Kick, Supercell Slam), golpes variáveis (Fury Attack, Bullet Seed, Rock Blast: d8 de golpes extras, Skill

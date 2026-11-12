@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.18";
-import { d, fmtM } from "./rules.js?v=0.9.18";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.18";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.18";
-import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.18";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.18";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.19";
+import { d, fmtM } from "./rules.js?v=0.9.19";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.19";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.19";
+import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.19";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.19";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -134,7 +134,7 @@ export async function spriteFor(rules, pkmn) {
 // (position, sheet, battle, pokéball, left/right flip). One under an Illusion keeps its disguise and
 // gets the new look saved for when it breaks. Returns how many changed.
 export async function refreshTokens(rules, items, { sprite = true } = {}) {
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.18");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.19");
   const cellM = await cellMeters();
   const plan = [];
   for (const it of items) {
@@ -174,7 +174,7 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.18");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.19");
   const cells = tokenCells(rules, pkmn, await cellMeters());
   const dpi = await OBR.scene.grid.getDpi();
   // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
@@ -284,6 +284,11 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
   await updateSheet(pokemon.id, (s, dr) => {
     dropIllusionDraft(s, dr); // back to its own look in the ball
     exitEffects(rules, s, inCombat, notes);
+    // switched out: Last Resort / First Impression start over, the type lost to Double Shock / Burn Up comes back
+    if (s.battle) {
+      if (s.battle.typeLost) { if (s.battle.typeLost.had) s.pkmn.ability_active_type = s.battle.typeLost.had; else delete s.pkmn.ability_active_type; }
+      for (const k of ["used", "firstRound", "typeLost", "lastMoveRound"]) delete s.battle[k];
+    }
     s.ball = { scale: { ...(dr.scale ?? { x: 1, y: 1 }) }, layer: dr.layer };
     dr.visible = false;
     dr.locked = true;
@@ -457,7 +462,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.18");
+    const { switchReactions } = await import("./protect.js?v=0.9.19");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -496,7 +501,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.18");
+    const { switchReactions } = await import("./protect.js?v=0.9.19");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }

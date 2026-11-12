@@ -1,9 +1,9 @@
 // Shortcuts for the table: start a combat with every selected Pokémon, send the selected ones back to
 // their trainers, a long rest for a whole team, and fainted Pokémon going back to the ball by themselves.
-import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.18";
-import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.18";
-import { rollInitiative, distanceMeters } from "./map.js?v=0.9.18";
-import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.18";
+import { OBR, SHEET_KEY, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.19";
+import { PRETTY, inInitiative, teamOf, TEAMS, guardedLoop } from "./battle.js?v=0.9.19";
+import { rollInitiative, distanceMeters } from "./map.js?v=0.9.19";
+import { TRAINER, trainerOf, inBall, party, store, canManage } from "./trainer.js?v=0.9.19";
 
 const running = async () => (await OBR.scene.items.getItems((i) => i.metadata?.[PRETTY]?.active === true)).length > 0;
 
@@ -11,6 +11,8 @@ const running = async () => (await OBR.scene.items.getItems((i) => i.metadata?.[
 function freshBattle(s, item) {
   const cond = s.battle?.cond;
   const alt = s.battle?.alt;
+  const lost = s.battle?.typeLost; // Double Shock / Burn Up from an older fight
+  if (lost) { if (lost.had) s.pkmn.ability_active_type = lost.had; else delete s.pkmn.ability_active_type; }
   s.battle = { ...(cond ? { cond } : {}), ...(alt ? { alt } : {}), econ: { action: true, bonus: true, reaction: true }, move: { used: 0, pos: { ...item.position } } };
 }
 

@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.18";
-import { describe } from "./combat.js?v=0.9.18";
-import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.18";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.18";
-import { dicePlusReady } from "./dice.js?v=0.9.18";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.18";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.19";
+import { describe } from "./combat.js?v=0.9.19";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.19";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.19";
+import { dicePlusReady } from "./dice.js?v=0.9.19";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.19";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error

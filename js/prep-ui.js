@@ -1,10 +1,10 @@
 // The "Preparar batalha" popup. The GM sets the sides, the format, the reserves, the arena and (for a
 // battle between the GM's own trainers) the simulation; each controller picks the starters of the
 // trainers it plays and says "pronto". The others' picks are never shown, only "escolhendo" / "pronto".
-import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.18";
-import { TEAMS } from "./battle.js?v=0.9.18";
-import { trainerOf, party, inBall } from "./trainer.js?v=0.9.18";
-import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.18";
+import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.19";
+import { TEAMS } from "./battle.js?v=0.9.19";
+import { trainerOf, party, inBall } from "./trainer.js?v=0.9.19";
+import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.19";
 
 const POP = `${ID}/prep`;
 const root = document.getElementById("root");

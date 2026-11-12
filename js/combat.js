@@ -4,26 +4,26 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.18";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.18";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.18";
-import { getRoller } from "./dice.js?v=0.9.18";
-import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.18";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.18";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.19";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.19";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.19";
+import { getRoller } from "./dice.js?v=0.9.19";
+import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.19";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.19";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError, moveTiming,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.18";
+} from "./battle.js?v=0.9.19";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.18";
+} from "./tactics.js?v=0.9.19";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.18";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.18";
-import * as MFX from "./movefx.js?v=0.9.18";
-import * as AMP from "./amp.js?v=0.9.18";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.19";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.19";
+import * as MFX from "./movefx.js?v=0.9.19";
+import * as AMP from "./amp.js?v=0.9.19";
 
 export { TurnError };
 
@@ -121,9 +121,12 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   const activating = !!sp && ["invuln", "focus", "charge"].includes(sp.kind) && !releasing && !(mfx.solar && field.weather === "sun");
   if (invulnOf(aSheet) && !releasing) throw new TurnError(`${who} está ${invulnText(charging)}: só pode usar ${charging.move}.`);
   if (releasing && !releaseReady(aSheet, running)) throw new TurnError(`${charging.move} só pode ser liberado no próximo turno.`);
-  if (moveName === "Fake Out" && running && !opts.force) {
-    const round = Number((await OBR.scene.getMetadata())["com.pretty-initiative/roundCount"] ?? 1);
-    if (round !== 1) throw new TurnError("Fake Out só pode ser usado na 1ª rodada do combate.", "round");
+  // what the move's text asks first (Last Resort, Fake Out, Sleep Talk, Dream Eater, Belly Drum...);
+  // the "no combate" ones only count in a fight
+  if (!opts.force) {
+    const inFight = ["Last Resort", "Fake Out", "First Impression", "Mat Block", "Blood Moon", "Gigaton Hammer"].includes(moveName);
+    const why = (running || !inFight) ? MFX.requirement(rules, aSheet, moveName, raw, { round, targets: targetItems.map(getSheet).filter(Boolean) }) : null;
+    if (why) throw new TurnError(why, "round");
   }
 
   // (Struggle is the last resort of an attack of opportunity: no PP)
@@ -207,7 +210,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (attacker.hp.current < rules.maxHP(attacker) / 2) throw new Error(`${move.label} falha: precisa de pelo menos metade do HP.`);
     if (stage(attacker, "Attack") >= 6) throw new Error(`${move.label} falha: o Ataque já está no máximo.`);
   }
-  const gate = await statusGate(rules, attackerItem, roller, { thawSelf: fx.thawSelf });
+  const gate = await statusGate(rules, attackerItem, roller, { thawSelf: fx.thawSelf, sleepOK: MFX.SLEEP_MOVES.includes(moveName) });
   if (gate.checks?.length) entry.checks = gate.checks;
   if (!gate.canAct) {
     await updateSheet(attackerItem.id, (s) => {
@@ -665,15 +668,19 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // Reflect / Light Screen / Aurora Veil on the target's side (not against crits; Infiltrator ignores).
       // Only on the user: damage halved; widened to the allies: only 1/3 less. They don't stack: the best one.
       const side = p.tSheet && (tFields.get(p.t.id) ?? field).sides?.[teamOf(p.tSheet)];
-      if (side && !p.crit && !aMods.infiltrator && !allies(aSheet, p.tSheet)) {
+      // (any attack, not only the enemies': the text doesn't make an exception)
+      if (side) {
         const shields = [[melee ? "reflect" : "lightScreen", melee ? "Reflect" : "Light Screen"], ["auroraVeil", "Aurora Veil"]]
           .filter(([k]) => side[k]).map(([k, label]) => ({ label, cut: side[k] === "third" ? 1 / 3 : 1 / 2 }))
           .sort((a, b) => b.cut - a.cut);
-        if (shields.length) {
+        const other = !shields.length && (side.reflect || side.lightScreen) ? (side.reflect ? "Reflect só vale contra corpo a corpo" : "Light Screen só vale contra ataques à distância") : null;
+        if (shields.length && p.crit) p.r.effects.push(`${shields[0].label} não vale contra crítico`);
+        else if (shields.length && aMods.infiltrator) p.r.effects.push(`Infiltrator passou pelo ${shields[0].label}`);
+        else if (shields.length) {
           const best = shields[0];
           final = Math.floor(final * (1 - best.cut));
           p.r.effects.push(`${best.label}: ${best.cut === 1 / 2 ? "dano pela metade" : "dano −1/3 (ampliado)"}`);
-        }
+        } else if (other) p.r.effects.push(other);
       }
       if (p.tm.red) final = Math.max(0, final - p.tm.red);
       // Redução: each 2 points halve the final damage (the target's "dano recebido" points count here too)
@@ -913,6 +920,20 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (ps) s.pkmn.hp.current = Math.min(max, ps.painSplitSelf);
     if (selfKO && s.pkmn.hp.current > 0) { s.pkmn.hp.current = 0; entry.notes.push(`${who} desmaiou (${moveName_})`); }
     s.battle.lastMove = moveName;
+    s.battle.lastMoveRound = round;
+    // the moves used in this fight (Last Resort) and the turn it first acted (First Impression, Mat Block)
+    if (!(s.battle.used ?? []).length) s.battle.firstRound = round;
+    s.battle.used = [...new Set([...(s.battle.used ?? []), moveName])];
+    // Double Shock / Burn Up: the user loses that type for the rest of the fight (back in the ball)
+    const spent = MFX.TYPE_SPENT[moveName];
+    if (spent && rules.types(s.pkmn).includes(spent)) {
+      const rest = rules.types(s.pkmn).filter((t) => t !== spent);
+      s.battle.typeLost = { type: spent, had: s.pkmn.ability_active_type ?? null };
+      s.pkmn.ability_active_type = rest[0] ?? "Typeless";
+      entry.notes.push(`${who} perdeu o tipo ${TYPE_PT[spent] ?? spent}`);
+    }
+    // Stuff Cheeks eats the Berry (Belch can be used after)
+    if (moveName === "Stuff Cheeks" && /berry/i.test(s.pkmn.item ?? "")) { s.battle.ateBerry = true; s.battle.itemLost = true; entry.notes.push(`comeu ${s.pkmn.item}`); }
     if (move.attackBonus != null && targetItems.length) s.battle.lastMissed = missedAll; // Temper Flare, Stomping Tantrum
     if (pendingHelp) delete s.battle.helped; // Helping Hand is for ONE move
     if (s.battle.charging) {
@@ -1115,7 +1136,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
     // an Illusion stuck from an older version (no saved look): the hit shows its real self too
     if (ch.damage > 0 && tNow && !self && !getSheet(tNow)?.realLook) {
-      const { dropIllusion } = await import("./trainer.js?v=0.9.18");
+      const { dropIllusion } = await import("./trainer.js?v=0.9.19");
       if (await dropIllusion(rules, tNow).catch(() => false)) r.effects.push("a ilusão se desfez!");
     }
     // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
@@ -1192,7 +1213,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (running && !opts.defense && targetItems.length) {
     const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
     if (hitIds.size) {
-      const { afterHitReactions } = await import("./protect.js?v=0.9.18");
+      const { afterHitReactions } = await import("./protect.js?v=0.9.19");
       const hit = await OBR.scene.items.getItems([...hitIds]);
       await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
     }

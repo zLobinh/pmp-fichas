@@ -8,11 +8,11 @@
 // Battle state lives in sheet.battle (not in the app's JSON, so the export stays importable):
 //   { cond: { Burning: { since, age, ... } }, grace: { key: ownTurnNumber }, turns,
 //     econ: { action, bonus, reaction, loseAction }, paraLock }
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.18";
-import { d } from "./rules.js?v=0.9.18";
-import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.18";
-import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.18";
-import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.18";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.19";
+import { d } from "./rules.js?v=0.9.19";
+import { bonusAllowed, abilitiesOf, statusBlock, endTurnAbilities, conditionDamage } from "./abilities.js?v=0.9.19";
+import { fieldNow, expireField, grounded, vortexEndTurn, areaOf, areaTurn, isAreaTurn } from "./field.js?v=0.9.19";
+import { endTurnMoves, startTurnField, grassyHeal } from "./movefx.js?v=0.9.19";
 
 // ------------------------------------------------------------------ conditions
 
@@ -351,11 +351,12 @@ export function spend(sheet, cost) {
 
 // returns { canAct, checks: [{ label, nat, failed }], reason, selfDamage, keepsAction }
 // rolls go through the given roller in one throw
-export async function statusGate(rules, item, roller, { thawSelf = false } = {}) {
+export async function statusGate(rules, item, roller, { thawSelf = false, sleepOK = false } = {}) {
   const sheet = getSheet(item);
   const cond = conditionsOf(sheet);
   if (cond.Frozen && !thawSelf) return { canAct: false, reason: "Congelado: não pode agir." };
-  if (cond.Asleep) return { canAct: false, reason: "Dormindo: não pode agir." };
+  // (Sleep Talk / Snore are exactly for while asleep)
+  if (cond.Asleep && !sleepOK) return { canAct: false, reason: "Dormindo: não pode agir." };
   if (cond.Stunned) return { canAct: false, reason: "Atordoado: não pode agir." };
   if (sheet.battle?.paraLock) return { canAct: false, reason: "Paralisado: travou até o próximo turno." };
   if (cond.Drowsy?.blocked) return { canAct: false, reason: "Sonolento: neste turno não consegue usar Moves." };
@@ -520,7 +521,7 @@ export async function endTurn(rules, item) {
   }
   // Healer: allies within 6 m with a condition may be cured (d20 15+)
   if (abilitiesOf(rules, getSheet(item)).includes("Healer")) {
-    const { distanceMeters } = await import("./map.js?v=0.9.18");
+    const { distanceMeters } = await import("./map.js?v=0.9.19");
     for (const o of enemies) {
       const os = getSheet(o);
       if (!allies(os, s0) || !Object.keys(conditionsOf(os)).length || (await distanceMeters(item, o)) > 6.05) continue;
@@ -608,6 +609,9 @@ export async function endCombat(items) {
       for (const k of Object.keys(cond)) if (!CONDITIONS[k]?.nonVolatile) delete cond[k];
       if (cond.BadlyPoisoned) { delete cond.BadlyPoisoned; cond.Poisoned = { since: 0, age: 0 }; }
       if (cond.Drowsy) delete cond.Drowsy;
+      // the type lost to Double Shock / Burn Up comes back after the fight
+      const lost = sheet.battle?.typeLost;
+      if (lost) { if (lost.had) sheet.pkmn.ability_active_type = lost.had; else delete sheet.pkmn.ability_active_type; }
       sheet.battle = { cond, ...(sheet.battle?.alt ? { alt: sheet.battle.alt } : {}) };
       sheet.pkmn.stages = {};
       delete sheet.pkmn.damage_amp; // like the app's reset_battle_stages
@@ -629,7 +633,7 @@ export async function floatHp(itemId, before) {
   const [it] = await OBR.scene.items.getItems([itemId]);
   const now = getSheet(it)?.pkmn?.hp?.current;
   if (now == null || now === before) return;
-  const { FX_CHANNEL } = await import("./map.js?v=0.9.18");
+  const { FX_CHANNEL } = await import("./map.js?v=0.9.19");
   const text = now < before ? `-${before - now}` : `+${now - before}`;
   await OBR.broadcast.sendMessage(FX_CHANNEL, { from: it.position, hits: [{ to: it.position, kind: now < before ? "hit" : "heal", text }] }, { destination: "ALL" }).catch(() => {});
 }
