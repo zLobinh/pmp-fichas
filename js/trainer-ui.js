@@ -2,11 +2,11 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.20";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.20";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, dropIllusion, createFromCode, refreshTokens, joinInitiativeNow } from "./trainer.js?v=0.9.20";
-import { distanceMeters } from "./map.js?v=0.9.20";
-import { longRest } from "./qol.js?v=0.9.20";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.22";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.22";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, dropIllusion, createFromCode, refreshTokens, joinInitiativeNow } from "./trainer.js?v=0.9.22";
+import { distanceMeters } from "./map.js?v=0.9.22";
+import { longRest } from "./qol.js?v=0.9.22";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");
@@ -124,11 +124,10 @@ async function doRelease(p) {
     const combat = await running();
     await release(state.rules, p, state.trainer);
     if (combat) {
-      // entering mid-combat: rolls initiative now and shows up in Pretty Sordid, but only acts from the
-      // next round (its turn this round is skipped by itself)
-      await updateSheet(p.id, (s) => { s.battle.econ = { action: false, bonus: true, reaction: true }; });
-      await joinInitiativeNow(state.rules, p);
-      await pushLog({ kind: "note", attacker: state.trainer.name, text: `${p.name} entrou no combate (já está na iniciativa; age a partir da próxima rodada)` });
+      // entering mid-combat (not a switch: after a knockout, or the first one out): rolls initiative now,
+      // shows up in Pretty Sordid and acts normally when its turn comes
+      const waits = await joinInitiativeNow(state.rules, p);
+      await pushLog({ kind: "note", attacker: state.trainer.name, text: `${p.name} entrou no combate (já está na iniciativa; ${waits ? "o aliado que caiu ainda não tinha agido: age a partir da próxima rodada" : "age quando chegar a vez dele"})` });
     }
     await entryAbilities(state.rules, await getItem(p.id));
   });

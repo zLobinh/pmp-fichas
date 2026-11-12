@@ -14,12 +14,12 @@
 //   - back in the ball: stages, concentration and protections end; conditions stay;
 //   - traps (Mean Look, Shadow Tag...) stop voluntary switches; forced switches (Dragon Tail,
 //     Whirlwind...) and switching moves (U-turn...) go through them.
-import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.20";
-import { d, fmtM } from "./rules.js?v=0.9.20";
-import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.20";
-import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.20";
-import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.20";
-import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.20";
+import { OBR, SDK, ID, SHEET_KEY, getSheet, updateSheet, pushLog, parseExport } from "./store.js?v=0.9.22";
+import { d, fmtM } from "./rules.js?v=0.9.22";
+import { CONDITIONS, conditionsOf, clearCondition, addStage, giveCondition, econOf, inInitiative, isActive, allies, PRETTY, passTurn, teamOf } from "./battle.js?v=0.9.22";
+import { distanceMeters, altitudeOf, rollInitiative } from "./map.js?v=0.9.22";
+import { FIELD_ABILITIES, startField, clearSide, handOverAreas, hazardsOnMove } from "./field.js?v=0.9.22";
+import { abilitiesOf, stageGuard } from "./abilities.js?v=0.9.22";
 
 export const TRAINER = `${ID}/trainer`;
 export const MAX_PARTY = 6;
@@ -134,7 +134,7 @@ export async function spriteFor(rules, pkmn) {
 // (position, sheet, battle, pokéball, left/right flip). One under an Illusion keeps its disguise and
 // gets the new look saved for when it breaks. Returns how many changed.
 export async function refreshTokens(rules, items, { sprite = true } = {}) {
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.20");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.22");
   const cellM = await cellMeters();
   const plan = [];
   for (const it of items) {
@@ -174,7 +174,7 @@ export async function createFromCode(rules, trainerItem, code) {
   const pkmn = parseExport(code, rules);
   const sp = await spriteFor(rules, pkmn);
   if (!sp) throw new Error(`Não achei o sprite de ${rules.name(pkmn)} na lista da extensão de imagens.`);
-  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.20");
+  const { tokenCells, cellMeters } = await import("./map.js?v=0.9.22");
   const cells = tokenCells(rules, pkmn, await cellMeters());
   const dpi = await OBR.scene.grid.getDpi();
   // born already inside the pokéball: invisible, locked, small, under the trainer (players never see
@@ -238,6 +238,11 @@ function exitEffects(rules, s, inCombat, notes) {
 async function leaveInitiativeQuiet(item, { pass = true } = {}) {
   if (!inInitiative(item)) return;
   const meta = await OBR.scene.getMetadata();
+  // fainted: note whether it had already acted this round (for the one that comes in its place)
+  if ((getSheet(item)?.pkmn?.hp?.current ?? 1) <= 0) {
+    const { markKnockout } = await import("./battle.js?v=0.9.22");
+    await markKnockout(item, Number(meta["com.pretty-initiative/roundCount"] ?? 1));
+  }
   const order = Object.values(meta["com.pretty-initiative/order"] ?? {}).filter((id) => id !== item.id);
   if (pass && isActive(item)) await passTurn(item.id);
   await OBR.scene.items.updateItems([item.id], (ds) => { for (const d0 of ds) delete d0.metadata[PRETTY]; });
@@ -278,7 +283,7 @@ export async function store(rules, pokemon, trainerItem, { quiet = false, pass =
   if (inBall(s0)) return;
   // back in the ball: the Mega Evolution ends (its own sprite again)
   if (s0.pkmn?.is_mega) {
-    const { megaRevert } = await import("./mega.js?v=0.9.20");
+    const { megaRevert } = await import("./mega.js?v=0.9.22");
     await megaRevert(rules, pokemon, { quiet: true }).catch(() => {});
     pokemon = (await OBR.scene.items.getItems([pokemon.id]))[0] ?? pokemon;
     s0 = getSheet(pokemon);
@@ -469,7 +474,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
 
   // Pursuit: enemies may hit the one leaving before it goes (the switch waits for their answer)
   if (combat && !fainted) {
-    const { switchReactions } = await import("./protect.js?v=0.9.20");
+    const { switchReactions } = await import("./protect.js?v=0.9.22");
     const ans = await switchReactions(rules, outItem, "out").catch(() => new Map());
     if ([...ans.values()].some((a) => a.status === "done")) await pushLog({ kind: "note", attacker: trainerItem.name, text: `${outItem.name} foi perseguido antes de voltar pra pokébola` });
     outItem = (await OBR.scene.items.getItems([outItem.id]))[0] ?? outItem;
@@ -490,14 +495,15 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   }
   const replacesFainted = combat && (fainted || !pretty);
   await updateSheet(inItem.id, (s) => {
-    // "o Pokémon que entra só tem ação bônus e reação"
-    s.battle.econ = { action: false, bonus: true, reaction: true };
+    // a voluntary switch: "o Pokémon que entra só tem ação bônus e reação"; in place of a fainted one
+    // it acts normally as soon as its turn comes (only switches cost an action)
+    s.battle.econ = replacesFainted ? { action: true, bonus: true, reaction: true } : { action: false, bonus: true, reaction: true };
     // a voluntary switch keeps the slot and rolls again at the next round
     if (combat && !replacesFainted) s.battle.needsInitiative = true;
     if (stages) s.pkmn.stages = stages;
     s.battle.enteredRound = null;
   });
-  // in place of a fainted one: into the initiative right now, acting from the next round
+  // in place of a fainted one: into the initiative right now, and it plays when its turn comes
   if (replacesFainted) await joinInitiativeNow(rules, inItem);
   // the action of the one that left (voluntary switch)
   if (tracked && !fainted && !opts.forced && !opts.free) await updateSheet(outItem.id, (s) => { s.battle.econ = { ...econOf(s), action: false }; });
@@ -508,7 +514,7 @@ export async function switchPokemon(rules, outItem, inItem, opts = {}) {
   await entryAbilities(rules, (await OBR.scene.items.getItems([inItem.id]))[0]);
   // Bolt Beak / Fishious Rend: enemies may hit the one that just came in
   if (combat) {
-    const { switchReactions } = await import("./protect.js?v=0.9.20");
+    const { switchReactions } = await import("./protect.js?v=0.9.22");
     await switchReactions(rules, (await OBR.scene.items.getItems([inItem.id]))[0], "in").catch(() => {});
   }
 }
@@ -707,14 +713,30 @@ export async function trap(rules, moveName, byItem, items) {
 // start of a round: whoever came in by a switch rolls initiative (and the ones that came in for a
 // fainted Pokémon join the initiative now)
 // a Pokémon that comes into a running fight (released, or in place of a fainted one): rolls initiative
-// now and shows up in Pretty Sordid at once; its turns this round are skipped (battle.joinRound,
-// battle.processTurn), it acts from the next round on
+// now and shows up in Pretty Sordid at once.
+//  - in place of an ally knocked out this round BEFORE its turn came: it can't take that ally's turn, so
+//    it only acts from the next round (battle.joinRound; battle.processTurn skips it this round);
+//  - otherwise (the ally had already acted, or it's not a replacement): it acts normally when its turn
+//    comes, with its action (only a voluntary switch costs one).
+// Returns true when it has to wait for the next round.
 export async function joinInitiativeNow(rules, item) {
-  const round = await roundNow();
   const [fresh] = await OBR.scene.items.getItems([item.id]);
-  if (!fresh) return;
+  if (!fresh) return false;
+  const round = await roundNow();
+  const tid = getSheet(fresh)?.trainer;
+  const fallen = tid ? (await party(tid)).find((p) => {
+    const b = getSheet(p).battle ?? {};
+    return p.id !== fresh.id && getSheet(p).pkmn.hp.current <= 0 && b.koRound === round && b.koActed === false && !b.koReplaced;
+  }) : null;
   await rollInitiative(rules, fresh);
-  await updateSheet(item.id, (s) => { s.battle.joinRound = round + 1; delete s.battle.needsInitiative; delete s.battle.joinNextRound; });
+  await updateSheet(item.id, (s) => {
+    delete s.battle.needsInitiative; delete s.battle.joinNextRound;
+    if (fallen) s.battle.joinRound = round + 1; else delete s.battle.joinRound;
+    s.battle.econ = { ...(s.battle.econ ?? {}), action: true, bonus: true, reaction: true };
+  });
+  // that fallen ally's turn is "used up" by this replacement (a second one sent the same round acts normally)
+  if (fallen) await updateSheet(fallen.id, (s) => { s.battle.koReplaced = true; });
+  return !!fallen;
 }
 
 export async function rollPending(rules) {

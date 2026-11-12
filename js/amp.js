@@ -14,7 +14,7 @@
 // sound, recoil, nameContains, typeOverride, stab, technician, condition, diceMult, perThree,
 // species (só nessas espécies), when (ativável: a extensão decide pelo campo/aliados/estado; o
 // "ATIVAR" do app, pkmn.activated_effects, também liga).
-import { SLICING, BITING, isSound, isRecoil } from "./abilities.js?v=0.9.20";
+import { SLICING, BITING, isSound, isRecoil } from "./abilities.js?v=0.9.22";
 
 const TYPE_ITEMS = {
   "Black Belt": "Fighting", "Black Glasses": "Dark", Charcoal: "Fire", "Dragon Fang": "Dragon", "Fairy Feather": "Fairy",

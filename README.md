@@ -261,8 +261,10 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   sem alcance, anda até o alvo do time.
 - **Marcador da área na iniciativa:** um selo redondo pequeno na borda do círculo (não em cima de quem usou o
   Move); o ícone antigo, sem tamanho próprio, virava uma tarja preta no Owlbear.
-- **Entrou nesta rodada:** só pula a vez na rodada exata em que entrou; um registro velho de outra luta é
-  descartado (era o que travava o Absol pulando a vez sem parar).
+- **Quem entra no meio da luta:** rola iniciativa na hora e entra no Pretty Sordid. No lugar de um aliado que foi
+  nocauteado **antes de agir** naquela rodada, ele não pode roubar a vez dele: só age a partir da próxima rodada.
+  Se o aliado **já tinha agido** (ou não é substituição), ele age normalmente quando chegar a vez dele, com a
+  ação. Só a troca voluntária gasta a ação de quem sai, e quem entra por troca fica só com ação bônus e reação.
 - **Equipe Selvagens:** pra Pokémon que não são de treinador (como Neutros).
 - **Áreas na iniciativa:** o Pretty Sordid só lista tokens, então cada área com duração ganha um marcador
   (uma imagem pequena presa ao círculo) que entra na iniciativa no lugar dela, com as rodadas no nome.

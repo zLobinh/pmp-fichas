@@ -7,15 +7,15 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.20";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.20";
-import * as MFX from "./movefx.js?v=0.9.20";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.20";
-import { startCombat } from "./qol.js?v=0.9.20";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.20";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.20";
-import { useMove } from "./combat.js?v=0.9.20";
-import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.20";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.22";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.22";
+import * as MFX from "./movefx.js?v=0.9.22";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.22";
+import { startCombat } from "./qol.js?v=0.9.22";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.22";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.22";
+import { useMove } from "./combat.js?v=0.9.22";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.22";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -154,7 +154,7 @@ export async function sendReserves(rules, prep, notes = []) {
       if (!next) break;
       const pos = await spotNear(trainer.position, prep.arena, [next.id]);
       await release(rules, next, trainer, { pos, quiet: true });
-      await updateSheet(next.id, (s) => { s.team = t.side; s.battle.econ = { action: false, bonus: true, reaction: true }; });
+      await updateSheet(next.id, (s) => { s.team = t.side; });
       await joinInitiativeNow(rules, next);
       await entryAbilities(rules, (await OBR.scene.items.getItems([next.id]))[0]).catch(() => {});
       t.used = (t.used ?? 0) + 1;
@@ -521,7 +521,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.20")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.22")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])
