@@ -239,6 +239,9 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   iniciais em campo. O popup volta pelo card "⚔ Batalha preparada → Abrir" no painel (ou pelo mesmo botão
   direito), e o resultado abre sozinho quando a luta acaba. "Encerrar e limpar" (mestre, durante ou depois)
   tira os lutadores da iniciativa e apaga a arena e as áreas de clima/terreno.
+- **PVP:** com qualquer treinador de jogador presente na sala, a batalha nunca é simulada: cada jogador escolhe
+  os iniciais e joga os próprios turnos. O "simular" lembrado de uma batalha anterior só volta quando todos os
+  treinadores são do mestre (e é desligado sozinho, com aviso no popup, se sobrar ligado).
 - **Simular (só treinadores do mestre):** a extensão joga os turnos. Cada Pokémon dá nota a todos os seus
   Moves e usa o melhor que funcionar: dano num inimigo (chance de acerto contra a CA, tipo, golpes, chance de
   derrubar, condição extra), dano em área (cone, linha, raio a partir dele, descontando aliados pegos),

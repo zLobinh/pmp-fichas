@@ -7,15 +7,15 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.22";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.22";
-import * as MFX from "./movefx.js?v=0.9.22";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.22";
-import { startCombat } from "./qol.js?v=0.9.22";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.22";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.22";
-import { useMove } from "./combat.js?v=0.9.22";
-import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.22";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.23";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.23";
+import * as MFX from "./movefx.js?v=0.9.23";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.23";
+import { startCombat } from "./qol.js?v=0.9.23";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.23";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.23";
+import { useMove } from "./combat.js?v=0.9.23";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.23";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -47,11 +47,13 @@ export async function newPrep(trainers) {
   // two trainers of the same team would be allies: put the second on the other side
   const sides = Object.values(entries).map((e) => e.side);
   if (trainers.length === 2 && sides[0] === sides[1]) entries[trainers[1].id].side = sides[0] === "jogadores" ? "inimigos" : "jogadores";
-  // the last battle's rules come back (format, reserves, simulation)
+  // the last battle's rules come back (format, reserves; the simulation only when every trainer is the GM's:
+  // a battle with players' trainers is played by the players)
   const last = (await OBR.scene.getMetadata())[LAST_KEY] ?? {};
+  const allNpc = await allGM(trainers);
   return setPrep(() => ({
     id: crypto.randomUUID(), by: OBR.player.id, at: Date.now(), status: "setup", configured: false,
-    format: last.format ?? 1, reserves: last.reserves ?? 2, arena: null, sim: !!last.sim, trainers: entries, result: null,
+    format: last.format ?? 1, reserves: last.reserves ?? 2, arena: null, sim: allNpc && !!last.sim, trainers: entries, result: null,
   }));
 }
 
@@ -83,7 +85,9 @@ export async function startPrepared(rules) {
   if (!Object.values(prep.trainers).every((t) => t.ready && t.starters.length)) return false;
   // "starting" while the starters come out: the simulation (and its reserves) waits for "running",
   // otherwise it sent reserves and marked them "came in this round" in the middle of the start
-  prep = await setPrep((p) => ({ ...p, status: "starting", startedAt: Date.now() }));
+  // a player's trainer in it: never simulated (the players play their own turns)
+  const simOK = prep.sim && await allGM(await OBR.scene.items.getItems(Object.keys(prep.trainers)));
+  prep = await setPrep((p) => ({ ...p, sim: simOK, status: "starting", startedAt: Date.now() }));
   const starters = [];
   for (const [tid, t] of Object.entries(prep.trainers)) {
     const [trainer] = await OBR.scene.items.getItems([tid]);
@@ -521,7 +525,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.22")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.23")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])
@@ -552,5 +556,11 @@ export async function endPrep() {
 export async function npcTrainer(trainer, gmId, players) {
   const owner = trainerOf(trainer)?.owner;
   return !owner || owner === gmId || !players.some((p) => p.id === owner);
+}
+// every one of these trainers is played by the GM (asked from the GM's browser)
+export async function allGM(trainers) {
+  const players = await OBR.party.getPlayers().catch(() => []);
+  for (const t of trainers) if (!(await npcTrainer(t, OBR.player.id, players))) return false;
+  return true;
 }
 export { TRAINER };

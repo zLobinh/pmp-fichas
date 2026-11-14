@@ -4,7 +4,7 @@
 // o deslocamento, os tipos e a habilidade da Mega, e amp.js soma 1 Ponto de Amplificação em todo Move.
 // Aqui: o token troca pro sprite da Mega, a habilidade nova entra (Drought, Intimidate...), e ao voltar pra
 // pokébola ou encerrar o combate a Mega acaba.
-import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.22";
+import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.23";
 
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };
 
@@ -40,7 +40,7 @@ export async function megaEvolve(rules, item, { variant = null, choice = null } 
     swapZygarde(sh.pkmn, true);
   });
   const fresh = (await OBR.scene.items.getItems([item.id]))[0];
-  const { refreshTokens, entryAbilities } = await import("./trainer.js?v=0.9.22");
+  const { refreshTokens, entryAbilities } = await import("./trainer.js?v=0.9.23");
   await refreshTokens(rules, [fresh]).catch(() => {});
   const md = rules.megaData(getSheet(fresh).pkmn);
   const label = `Mega ${s.pkmn.species?.current ?? item.name}${v && !/padr/i.test(v) ? ` ${v}` : ""}`;
@@ -58,7 +58,7 @@ export async function megaRevert(rules, item, { quiet = false } = {}) {
     sh.pkmn.is_mega = false;
     swapZygarde(sh.pkmn, false);
   });
-  const { refreshTokens } = await import("./trainer.js?v=0.9.22");
+  const { refreshTokens } = await import("./trainer.js?v=0.9.23");
   await refreshTokens(rules, [(await OBR.scene.items.getItems([item.id]))[0]]).catch(() => {});
   if (!quiet) await pushLog({ kind: "note", attacker: item.name, text: "voltou à forma normal (fim da Mega Evolução)" });
   return true;

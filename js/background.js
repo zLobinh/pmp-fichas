@@ -1,17 +1,17 @@
 // Context menu entries on tokens, the quick sheet on selection, and notifications for everyone's rolls.
-import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.22";
-import { describe } from "./combat.js?v=0.9.22";
-import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.22";
-import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending, tidyStored } from "./trainer.js?v=0.9.22";
-import { FX_CHANNEL, playFx } from "./map.js?v=0.9.22";
-import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.22";
-import { watchTurns, watchMarks } from "./battle.js?v=0.9.22";
-import { watchMovement, TOAST } from "./tactics.js?v=0.9.22";
-import { runPrepared } from "./prepared.js?v=0.9.22";
-import { loadRules } from "./store.js?v=0.9.22";
-import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.22";
-import { PREP_KEY, getPrep, newPrep, startPrepared, runSim, checkEnd, drawArena, simRunning } from "./prep.js?v=0.9.22";
-import { openPrep } from "./ui.js?v=0.9.22";
+import { OBR, ID, SHEET_KEY, LOG_CHANNEL, asset, getSheet, canEdit } from "./store.js?v=0.9.23";
+import { describe } from "./combat.js?v=0.9.23";
+import { openSheet, openHud, openTrainer, autoHudEnabled, hudAlive, markHudAlive, rollNotices } from "./ui.js?v=0.9.23";
+import { TRAINER, trainerOf, makeTrainer, canManage, link, rollPending, tidyStored } from "./trainer.js?v=0.9.23";
+import { FX_CHANNEL, playFx } from "./map.js?v=0.9.23";
+import { AIM_START, AIM_ABORT, startAim, abortAim, failAim } from "./area.js?v=0.9.23";
+import { watchTurns, watchMarks } from "./battle.js?v=0.9.23";
+import { watchMovement, TOAST } from "./tactics.js?v=0.9.23";
+import { runPrepared } from "./prepared.js?v=0.9.23";
+import { loadRules } from "./store.js?v=0.9.23";
+import { startCombat, sendToTrainers, watchFainted } from "./qol.js?v=0.9.23";
+import { PREP_KEY, getPrep, newPrep, startPrepared, runSim, checkEnd, drawArena, simRunning } from "./prep.js?v=0.9.23";
+import { openPrep } from "./ui.js?v=0.9.23";
 
 let lastSelection = "";
 let viewer = { id: null, role: "PLAYER" }; // hides enemy AC/HP from players in the notifications
@@ -137,7 +137,7 @@ OBR.onReady(() => {
       const rules = await loadRules();
       // (players only resize their own Pokémon)
       const ids = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id)).map((i) => i.id);
-      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.22");
+      const { fitDraft, tokenCells, cellMeters } = await import("./map.js?v=0.9.23");
       const cellM = await cellMeters();
       await OBR.scene.items.updateItems(ids, (ds) => {
         for (const d0 of ds) { const s = d0.metadata[SHEET_KEY]; fitDraft(d0, tokenCells(rules, s.pkmn, cellM), s); }
@@ -156,7 +156,7 @@ OBR.onReady(() => {
     onClick: async (context) => {
       const items = context.items.filter((i) => getSheet(i) && (viewer.role === "GM" || getSheet(i).owner === viewer.id));
       try {
-        const { refreshTokens } = await import("./trainer.js?v=0.9.22");
+        const { refreshTokens } = await import("./trainer.js?v=0.9.23");
         const n = await refreshTokens(await loadRules(), items);
         OBR.notification.show(`Atualizado: ${n} token(s)`, "SUCCESS");
       } catch (e) { OBR.notification.show(e.message, "ERROR"); }
@@ -363,7 +363,8 @@ OBR.onReady(() => {
       prepStarting = true;
       try {
         const rules = await loadRules();
-        if (await startPrepared(rules).catch((e) => { OBR.notification.show(`Batalha: ${e.message}`, "ERROR"); return false; }) && prep.sim) runSim(rules).catch(() => {});
+        // (the simulation only if it's still on after the start: a player's trainer turns it off)
+        if (await startPrepared(rules).catch((e) => { OBR.notification.show(`Batalha: ${e.message}`, "ERROR"); return false; }) && (await getPrep())?.sim) runSim(rules).catch(() => {});
       } finally { prepStarting = false; }
     }
     // a simulation that was running when this browser opened goes on (runSim runs once at a time)

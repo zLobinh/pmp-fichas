@@ -1,10 +1,10 @@
 // The "Preparar batalha" popup. The GM sets the sides, the format, the reserves, the arena and (for a
 // battle between the GM's own trainers) the simulation; each controller picks the starters of the
 // trainers it plays and says "pronto". The others' picks are never shown, only "escolhendo" / "pronto".
-import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.22";
-import { TEAMS } from "./battle.js?v=0.9.22";
-import { trainerOf, party, inBall } from "./trainer.js?v=0.9.22";
-import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.22";
+import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.23";
+import { TEAMS } from "./battle.js?v=0.9.23";
+import { trainerOf, party, inBall } from "./trainer.js?v=0.9.23";
+import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.23";
 
 const POP = `${ID}/prep`;
 const root = document.getElementById("root");
@@ -29,6 +29,8 @@ const edit = (fn) => setPrep((p) => { fn(p); return p; }).catch((e) => { state.m
 function gmBlock(p) {
   if (!state.isGM || p.status === "done") return null;
   const allNpc = state.trainers.every((t) => state.npc[t.id]);
+  // a "simular" left on from an older battle can't apply to a battle with players
+  if (!allNpc && p.sim && p.status === "setup" && !state.unsim) { state.unsim = true; edit((x) => { x.sim = false; }); }
   const lock = p.status !== "setup";
   return h("div", { class: "card" },
     h("h2", {}, "Regras da batalha (mestre)"),
@@ -56,7 +58,8 @@ function gmBlock(p) {
       p.arena ? h("button", { class: "small", disabled: lock, onclick: async () => { await clearArena(); await edit((x) => { x.arena = null; }); } }, "Tirar") : null),
     allNpc ? h("label", { class: "row small", style: "margin-top:6px;flex-wrap:nowrap;align-items:flex-start;gap:6px" },
       h("input", { type: "checkbox", checked: !!p.sim, disabled: lock, onchange: (e) => edit((x) => { x.sim = e.target.checked; }) }),
-      "Simular a batalha (a extensão joga os turnos dos treinadores e mostra um resumo no fim)") : null,
+      "Simular a batalha (a extensão joga os turnos dos treinadores e mostra um resumo no fim)")
+      : h("div", { class: "small muted", style: "margin-top:6px" }, "⚔ Tem treinador de jogador: cada um joga os próprios turnos (sem simulação)."),
     p.status === "setup" ? h("div", { class: "row", style: "margin-top:8px;gap:6px" },
       h("button", { class: `small ${p.configured ? "" : "primary"}`, onclick: () => edit((x) => { x.configured = !x.configured; }) },
         p.configured ? "Reabrir as regras" : "Regras prontas: liberar a escolha dos iniciais"),
