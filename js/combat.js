@@ -4,26 +4,26 @@
 //      status contests and damage
 //   3. stages in to-hit/DC/AC/saves/damage, crit margin, natural 1/20 on saves, burn, type effectiveness
 //   4. conditions and stage changes from the move text, written to the tokens
-import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.23";
-import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.23";
-import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.23";
-import { getRoller } from "./dice.js?v=0.9.23";
-import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.23";
-import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.23";
+import { OBR, getSheet, updateSheet, pushLog, getSettings } from "./store.js?v=0.9.28";
+import { TYPE_PT, ATTR_PT, signed, fmtM, d } from "./rules.js?v=0.9.28";
+import { checkRange, OutOfRange, sendFx, distanceMeters } from "./map.js?v=0.9.28";
+import { getRoller } from "./dice.js?v=0.9.28";
+import { defenses, endure, DEFENSES, AFTER_HIT } from "./protect.js?v=0.9.28";
+import { FORCE, SELF_SWITCH, TRAPS, happened, trap, bench, forceRandomSwitch, dropIllusionDraft } from "./trainer.js?v=0.9.28";
 import {
   CONDITIONS, STAGES, conditionsOf, giveCondition, clearCondition, stage, addStage, moveEffects, chooseCost, spend,
   statusGate, attackAdvantage, saveAdvantage, isActive, inInitiative, econOf, PRETTY, TurnError, moveTiming,
   allies, teamOf, canSeeFull, ampPoints, redPoints, pointsSummary, amplifyDice, pointsText,
-} from "./battle.js?v=0.9.23";
+} from "./battle.js?v=0.9.28";
 import {
   special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, elevated, movement, jumpOpts, spendMovement,
   fall, approach, moveToken, checkSentinel, jumps,
-} from "./tactics.js?v=0.9.23";
+} from "./tactics.js?v=0.9.28";
 
-import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.23";
-import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.23";
-import * as MFX from "./movefx.js?v=0.9.23";
-import * as AMP from "./amp.js?v=0.9.23";
+import { abilitiesOf, attackMods, targetMods, afterHit, statusBlock, stageGuard, onCondition, isSound } from "./abilities.js?v=0.9.28";
+import { fieldNow, startField, FIELD_MOVES, clearTerrain, clearSide, grounded, getField, roundNow } from "./field.js?v=0.9.28";
+import * as MFX from "./movefx.js?v=0.9.28";
+import * as AMP from "./amp.js?v=0.9.28";
 
 export { TurnError };
 
@@ -645,6 +645,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
       // Mestre de Combate: +10 once (on a save move, only when the target failed); Investida Poderosa +5
       const featDmg = (power && (move.attackBonus != null || p.hitFactor === 1) ? 10 : 0) + chargeBonus;
       let total = roll.total + atkStage * aProf + featDmg;
+      if (atkStage) p.r.effects.push(`${atkStageKey === "Attack" ? "Ataque" : atkStageKey === "SpecialAttack" ? "Ataque Esp." : atkStageKey === "Defense" ? "Defesa" : atkStageKey} ${atkStage > 0 ? "+" : ""}${atkStage}: ${atkStage > 0 ? "+" : "−"}${Math.abs(atkStage * aProf)} de dano`);
       if (burned && melee) total = Math.floor(total / 2); // Queimado: melee damage halved
       // "Ordem da entrada de dano" (pág. 55): ... 8. Defesa/Defesa Especial do alvo,
       // 9. vulnerabilidades e resistências por último
@@ -660,6 +661,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
         if (aAbil.includes("Unaware")) defStage = 0;
         if (p.crit && defStage > 0) defStage = 0; // a crit ignores the defender's positive stages
         final = Math.max(0, final - defStage * rules.proficiency(p.target));
+        if (defStage) p.r.effects.push(`${(mfx.defAs ?? (melee ? "Defense" : "SpecialDefense")) === "Defense" ? "Defesa" : "Defesa Esp."} do alvo ${defStage > 0 ? "+" : ""}${defStage}: ${defStage > 0 ? "−" : "+"}${Math.abs(defStage * rules.proficiency(p.target))} de dano`);
       }
       final = Math.floor(final * eff);
       if (p.hitFactor === 0.5) final = Math.floor(final / 2);
@@ -1136,7 +1138,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
     if (ch.clearTerrain) { await clearTerrain(tNow); entry.notes.push("o terreno foi desfeito"); }
     // an Illusion stuck from an older version (no saved look): the hit shows its real self too
     if (ch.damage > 0 && tNow && !self && !getSheet(tNow)?.realLook) {
-      const { dropIllusion } = await import("./trainer.js?v=0.9.23");
+      const { dropIllusion } = await import("./trainer.js?v=0.9.28");
       if (await dropIllusion(rules, tNow).catch(() => false)) r.effects.push("a ilusão se desfez!");
     }
     // Whirlpool, Fire Spin, Sand Tomb...: a vortex under the target for 5 rounds
@@ -1213,7 +1215,7 @@ export async function useMove(rules, attackerItem, moveName, targetItems, opts =
   if (running && !opts.defense && targetItems.length) {
     const hitIds = new Set(entry.results.filter((r) => r.targetId && (r.damage?.final > 0 || r.attack?.hit)).map((r) => r.targetId));
     if (hitIds.size) {
-      const { afterHitReactions } = await import("./protect.js?v=0.9.23");
+      const { afterHitReactions } = await import("./protect.js?v=0.9.28");
       const hit = await OBR.scene.items.getItems([...hitIds]);
       await afterHitReactions(rules, (await OBR.scene.items.getItems([attackerItem.id]))[0] ?? attackerItem, move, hit).catch(() => {});
     }

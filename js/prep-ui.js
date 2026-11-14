@@ -1,10 +1,11 @@
 // The "Preparar batalha" popup. The GM sets the sides, the format, the reserves, the arena and (for a
 // battle between the GM's own trainers) the simulation; each controller picks the starters of the
 // trainers it plays and says "pronto". The others' picks are never shown, only "escolhendo" / "pronto".
-import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.23";
-import { TEAMS } from "./battle.js?v=0.9.23";
-import { trainerOf, party, inBall } from "./trainer.js?v=0.9.23";
-import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.23";
+import { OBR, ID, loadRules, getSheet, h, syncTheme } from "./store.js?v=0.9.28";
+import { TEAMS } from "./battle.js?v=0.9.28";
+import { trainerOf, party, inBall } from "./trainer.js?v=0.9.28";
+import { PREP_KEY, getPrep, setPrep, activesFor, npcTrainer, clearArena, endPrep } from "./prep.js?v=0.9.28";
+import { requestPlace } from "./spot.js?v=0.9.28";
 
 const POP = `${ID}/prep`;
 const root = document.getElementById("root");
@@ -87,6 +88,25 @@ function pickBlock(p, t) {
       title: `${x.name} · ${getSheet(x).pkmn.hp.current}/${state.rules.maxHP(getSheet(x).pkmn)} HP`, onclick: () => toggle(x.id),
     }, h("img", { src: getSheet(x).realLook?.image?.url ?? x.image?.url ?? "" }), h("span", {}, getSheet(x).realLook?.name ?? x.name),
       entry.starters.includes(x.id) ? h("b", {}, `${entry.starters.indexOf(x.id) + 1}`) : null)) : h("span", { class: "muted small" }, "Nenhum Pokémon de pé.")),
+    // where each starter comes out: one click on the map (only this side sees its marks); without one,
+    // next to the trainer
+    entry.starters.length ? h("div", { class: "row small", style: "margin-top:6px;gap:6px;flex-wrap:wrap" },
+      h("span", { class: "muted" }, "Onde sai:"),
+      entry.starters.map((id) => {
+        const mon = healthy.find((x) => x.id === id);
+        if (!mon) return null;
+        const name = getSheet(mon).realLook?.name ?? mon.name;
+        const has = !!entry.spots?.[id];
+        return h("button", {
+          class: `small ${has ? "" : "primary"}`, disabled: !p.configured || p.status !== "setup" || entry.ready,
+          title: p.arena ? "Clique na arena onde ele vai sair" : "Clique no mapa onde ele vai sair",
+          onclick: async () => {
+            await requestPlace({ action: "prep", trainerId: t.id, pokemonId: id, label: name, arena: p.arena ?? null });
+            state.msg = `Clique no mapa onde ${name} vai sair${p.arena ? " (dentro da arena)" : ""}.`;
+            render();
+          },
+        }, `📍 ${name}${has ? " ✓" : ""}`);
+      })) : null,
     h("div", { class: "row", style: "margin-top:6px" },
       h("span", { class: "spacer" }),
       h("button", { class: `small ${entry.ready ? "" : "primary"}`, disabled: !p.configured || p.status !== "setup" || entry.starters.length !== Math.min(need, healthy.length),

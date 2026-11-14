@@ -1,10 +1,10 @@
 // Action popover: Pokémon in the scene, combat log and table settings.
-import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.23";
-import { describe } from "./combat.js?v=0.9.23";
-import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.23";
-import { rollInitiative, initiativeOf } from "./map.js?v=0.9.23";
-import { dicePlusReady } from "./dice.js?v=0.9.23";
-import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.23";
+import { OBR, ID, LOG_KEY, SHEET_KEY, loadRules, getSheet, getSettings, setSettings, h, syncTheme, asset } from "./store.js?v=0.9.28";
+import { describe } from "./combat.js?v=0.9.28";
+import { openSheet, openHud, openPrep, autoHudEnabled, setAutoHud, rollNotices, setRollNotices } from "./ui.js?v=0.9.28";
+import { rollInitiative, initiativeOf } from "./map.js?v=0.9.28";
+import { dicePlusReady } from "./dice.js?v=0.9.28";
+import { endCombat, canSeeFull, teamOf, TEAMS, WATCH_STATUS } from "./battle.js?v=0.9.28";
 
 // the GM's watchers (turns, token marks, movement) run in the background of this browser:
 // shows whether they are alive and their last error
@@ -127,7 +127,7 @@ function render() {
                 onclick: async (ev) => {
                   ev.target.disabled = true;
                   // the Megas end with the fight
-                  const { megaRevert } = await import("./mega.js?v=0.9.23");
+                  const { megaRevert } = await import("./mega.js?v=0.9.28");
                   for (const i of withSheet) if (getSheet(i)?.pkmn?.is_mega) await megaRevert(rules, i).catch(() => {});
                   await endCombat(await OBR.scene.items.getItems(withSheet.map((i) => i.id)));
                   await OBR.scene.setMetadata({ "com.pmp-fichas/turn": null });

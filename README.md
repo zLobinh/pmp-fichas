@@ -239,6 +239,15 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   iniciais em campo. O popup volta pelo card "⚔ Batalha preparada → Abrir" no painel (ou pelo mesmo botão
   direito), e o resultado abre sozinho quando a luta acaba. "Encerrar e limpar" (mestre, durante ou depois)
   tira os lutadores da iniciativa e apaga a arena e as áreas de clima/terreno.
+- **Onde cada Pokémon sai (spot.js):** na escolha dos iniciais, cada lado clica em "📍 Nome" e depois no mapa
+  (dentro da arena, se tiver) pra marcar onde cada inicial sai; a marca só aparece pra quem marcou e some quando a
+  batalha começa. Sem marca, sai do lado do treinador. No meio da luta, quem entra depois de um nocaute (Liberar,
+  ou trocar o desmaiado no cartão do treinador) sai onde o jogador clicar, a até 9 m do treinador (um círculo
+  mostra o alcance; Esc cancela). Troca normal (e forçada) assume o lugar de quem saiu. O clique e a ação rodam
+  no background, então funciona mesmo se o popup fechar ao clicar no mapa.
+- **Requisito da Mega:** segurar uma Mega Pedra (o item "Mega Pedra" do app, que vale pra qualquer Mega da
+  espécie, inclusive X/Y/Z; os nomes específicos tipo Charizardite X também são aceitos), Blue Orb / Red Orb na Reversão Primal de Kyogre / Groudon, e
+  Dragon Ascent pra Mega Rayquaza. Sem isso a ficha rápida mostra o que falta (🔒) e só o mestre pode forçar.
 - **PVP:** com qualquer treinador de jogador presente na sala, a batalha nunca é simulada: cada jogador escolhe
   os iniciais e joga os próprios turnos. O "simular" lembrado de uma batalha anterior só volta quando todos os
   treinadores são do mestre (e é desligado sozinho, com aviso no popup, se sobrar ligado).
@@ -297,7 +306,9 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   a reação e perde a ação do próximo turno.
 - **Illusion (Zoroark):** no cartão do treinador, escolha por quem ele se passa (outro Pokémon da equipe). Ao
   sair da pokébola, o token fica com a imagem, o tamanho, o nome e os tipos (na ficha dos outros) do disfarce;
-  o primeiro dano desfaz a ilusão (e voltar pra pokébola também).
+  o primeiro dano desfaz a ilusão (e voltar pra pokébola também). O disfarce entra na mesma atualização que
+  deixa o token visível (ninguém vê o sprite real nem por um instante), e o registro só usa o nome do disfarce
+  ("liberou", "mandou", "entrou no combate", "trocou"); a entrada não anuncia mais a habilidade Illusion.
 - **Adicionar pelo código:** no cartão do treinador, "Adicionar Pokémon pelo código do app" cria o token com o
   sprite da extensão Imagem por Link (mesma lista), o tamanho certo e a ficha, já na pokébola (invisível e
   travado desde o começo, os jogadores não veem). O sprite segue a ficha: forma (Hisui usa o GIF "Nome2",
@@ -330,8 +341,13 @@ importa o código que o app exporta, mostra a ficha ao clicar no token e rola os
   acertam na chuva, Blizzard no granizo, Solar Beam sai na hora no sol, areia/granizo machucam no começo do
   turno, Grassy Terrain cura, Electric Terrain acorda, Misty Terrain bloqueia condições, Psychic Terrain tira a
   ação bônus. Safeguard, Mist e Tailwind valem pros aliados no raio; Trick Room fica registrado.
-- **Mega Evolução (mega.js):** na ficha rápida dos Pokémon que têm Mega aparece "✨ Mega Evoluir" (com a escolha
-  de X/Y e, nas Megas que deixam escolher, de onde vai o bônus, como a Beedrill). Ativa, valem os atributos, a CA,
+- **Estágios no dano:** Ataque (corpo a corpo) / Ataque Especial (à distância) somam estágio × proficiência de
+  quem ataca, e Defesa / Defesa Especial do alvo tiram estágio × proficiência dele (crítico ignora estágio negativo
+  de quem ataca e positivo de quem defende). O texto do dano do move na ficha já mostra o estágio de ataque (como
+  o app: "2d8+10" com Ataque +2), e o resultado do golpe diz quanto cada estágio somou ou tirou.
+- **Mega Evolução (mega.js):** na ficha rápida dos Pokémon que têm Mega aparece "✨ Mega Evoluir". Como no app,
+  quando tem mais de uma Mega ele pergunta "Pra qual Mega Evoluir?" (Mega X · Tough Claws / Mega Y · Drought...),
+  e nas que deixam escolher o atributo (Beedrill) pergunta onde vai o bônus. Ativa, valem os atributos, a CA,
   o deslocamento (e o voo que algumas ganham), os tipos e a habilidade da Mega (megadex do app, em
   `data/rules.json`), +1 Ponto de Amplificação em todo Move, o token troca pro sprite da Mega e a habilidade nova
   entra em campo (Drought, Intimidate...). "Desfazer Mega" volta ao normal; voltar pra pokébola ou "Encerrar

@@ -7,15 +7,15 @@
 //   { id, by, status: "setup" | "running" | "done", configured, format, reserves, arena: {x1,y1,x2,y2}|null,
 //     sim, trainers: { [trainerId]: { side, actives, ready, starters: [ids], used } }, result }
 // Each trainer's controller only writes its own entry; the UI shows the others as "escolhendo"/"pronto".
-import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.23";
-import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.23";
-import * as MFX from "./movefx.js?v=0.9.23";
-import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.23";
-import { startCombat } from "./qol.js?v=0.9.23";
-import { distanceMeters, pointMeters } from "./map.js?v=0.9.23";
-import { approach, moveToken, movement } from "./tactics.js?v=0.9.23";
-import { useMove } from "./combat.js?v=0.9.23";
-import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.23";
+import { OBR, ID, SHEET_KEY, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.28";
+import { PRETTY, isActive, passTurn, moveTiming, conditionsOf, moveEffects, CONDITIONS, TEAMS } from "./battle.js?v=0.9.28";
+import * as MFX from "./movefx.js?v=0.9.28";
+import { TRAINER, trainerOf, party, store, release, inBall, joinInitiativeNow, entryAbilities } from "./trainer.js?v=0.9.28";
+import { startCombat } from "./qol.js?v=0.9.28";
+import { distanceMeters, pointMeters } from "./map.js?v=0.9.28";
+import { approach, moveToken, movement } from "./tactics.js?v=0.9.28";
+import { useMove } from "./combat.js?v=0.9.28";
+import { isAreaTurn, fieldNow, FIELD_MOVES, removeAreas, AREA_KEY } from "./field.js?v=0.9.28";
 
 export const PREP_KEY = `${ID}/prep`;
 export const ARENA_KEY = `${ID}/arena`;
@@ -107,7 +107,8 @@ export async function startPrepared(rules) {
       const [p] = await OBR.scene.items.getItems([id]);
       if (!p || getSheet(p).pkmn.hp.current <= 0) continue;
       try {
-        const pos = await spotNear(trainer.position, prep.arena, [p.id]);
+        // where its side chose (📍 in the popup), or next to the trainer; a free square around that spot
+        const pos = await spotNear(t.spots?.[p.id] ?? trainer.position, prep.arena, [p.id]);
         if (inBall(getSheet(p))) await release(rules, p, trainer, { pos, quiet: true });
         else await OBR.scene.items.updateItems([p.id], (ds) => { for (const d0 of ds) d0.position = pos; });
         // the side chosen here is the team for the fight
@@ -163,8 +164,10 @@ export async function sendReserves(rules, prep, notes = []) {
       await entryAbilities(rules, (await OBR.scene.items.getItems([next.id]))[0]).catch(() => {});
       t.used = (t.used ?? 0) + 1;
       out++;
-      notes.push(`${trainer.name} mandou ${next.name}`);
-      await pushLog({ kind: "note", attacker: trainer.name, text: `mandou ${next.name}${t.used > limit ? ` (reserva ${t.used - limit} de ${prep.reserves})` : " (lugar vazio no campo)"}` });
+      // (the name on the token now: a Zoroark comes out under its Illusion)
+      const shown = (await OBR.scene.items.getItems([next.id]))[0]?.name ?? next.name;
+      notes.push(`${trainer.name} mandou ${shown}`);
+      await pushLog({ kind: "note", attacker: trainer.name, text: `mandou ${shown}${t.used > limit ? ` (reserva ${t.used - limit} de ${prep.reserves})` : " (lugar vazio no campo)"}` });
     }
   }
   await setPrep((p) => { if (p) for (const [tid, t] of Object.entries(prep.trainers)) if (p.trainers[tid]) p.trainers[tid].used = t.used; return p; });
@@ -525,7 +528,7 @@ export async function checkEnd(rules) {
 export async function drawArena(a, b) {
   const old = await OBR.scene.items.getItems((i) => !!i.metadata?.[ARENA_KEY]);
   if (old.length) await OBR.scene.items.deleteItems(old.map((i) => i.id));
-  const { buildShape } = (await import("./store.js?v=0.9.23")).SDK;
+  const { buildShape } = (await import("./store.js?v=0.9.28")).SDK;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
   const item = buildShape().shapeType("RECTANGLE").width(w).height(h).position({ x, y })
     .fillColor("#f59e0b").fillOpacity(0.06).strokeColor("#f59e0b").strokeOpacity(0.9).strokeWidth(6).strokeDash([30, 18])

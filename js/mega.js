@@ -4,7 +4,7 @@
 // o deslocamento, os tipos e a habilidade da Mega, e amp.js soma 1 Ponto de Amplificação em todo Move.
 // Aqui: o token troca pro sprite da Mega, a habilidade nova entra (Drought, Intimidate...), e ao voltar pra
 // pokébola ou encerrar o combate a Mega acaba.
-import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.23";
+import { OBR, getSheet, updateSheet, pushLog } from "./store.js?v=0.9.28";
 
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };
 
@@ -17,6 +17,30 @@ export function megaOptions(rules, pkmn) {
   return { variants, choice };
 }
 
+// What this Mega needs (null = ok): a Mega Stone held — the app's item "Mega Pedra", or the species' own
+// stone by name (Charizardite X, Absolite Z, Blastoisinite, Lucarionite...) —, the Orbs of the Primal
+// Reversion (Kyogre: Blue Orb, Groudon: Red Orb), or the move Dragon Ascent (Rayquaza)
+const ORBS = { Kyogre: "Blue Orb", Groudon: "Red Orb" };
+const letters = (s) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+export function megaRequirement(rules, pkmn, variant = null) {
+  const species = pkmn?.species?.current ?? "";
+  const item = pkmn.item && !pkmn.battle?.itemLost ? String(pkmn.item).trim() : "";
+  if (species === "Rayquaza") {
+    return Object.keys(pkmn.moves ?? {}).some((m) => /dragon ascent/i.test(m)) ? null : "Mega Rayquaza: precisa conhecer Dragon Ascent.";
+  }
+  if (ORBS[species]) return letters(item) === letters(ORBS[species]) ? null : `Reversão Primal: ${species} precisa segurar a ${ORBS[species]}.`;
+  const v = variant && !/padr/i.test(variant) ? variant.toUpperCase() : null;
+  // the app's item is just "Mega Pedra" (it only works on the right Pokémon, any of its Megas)
+  if (/^mega\s*(pedra|stone)$/i.test(item)) return null;
+  const hint = `${species}ite${v ? ` ${v}` : ""}`;
+  const m = /^(.*?ite)(?:\s+([xyz]))?$/i.exec(item);
+  if (!m) return `Precisa segurar uma Mega Pedra${item ? ` (está com ${item})` : ""}.`;
+  if (letters(m[1]).slice(0, 5) !== letters(species).slice(0, 5)) return `${item} não é a Mega Pedra de ${species} (${hint}).`;
+  const has = m[2] ? m[2].toUpperCase() : null;
+  if (rules.megaOf(pkmn)?.variants && has !== v) return `Pra Mega${v ? ` ${v}` : ""} precisa da ${hint} (segurando ${item}).`;
+  return null;
+}
+
 // Zygarde: Core Enforcer <-> Nihil Light (the app swaps the move with the Mega)
 function swapZygarde(pkmn, on) {
   if (pkmn.species?.current !== "Zygarde" || !pkmn.moves) return;
@@ -25,12 +49,15 @@ function swapZygarde(pkmn, on) {
   if (key) { pkmn.moves[to] = { ...pkmn.moves[key] }; delete pkmn.moves[key]; }
 }
 
-export async function megaEvolve(rules, item, { variant = null, choice = null } = {}) {
+export async function megaEvolve(rules, item, { variant = null, choice = null, force = false } = {}) {
   const s = getSheet(item);
   const opts = megaOptions(rules, s?.pkmn);
   if (!opts) throw new Error(`${item.name} não tem Mega Evolução.`);
   if (s.pkmn.is_mega) return null;
   const v = opts.variants ? (variant && opts.variants.includes(variant) ? variant : opts.variants[0]) : null;
+  // the Mega Stone / Orb / Dragon Ascent (the GM may force it)
+  const need = megaRequirement(rules, { ...s.pkmn, battle: s.battle }, v);
+  if (need && !force) throw new Error(need);
   const ch = opts.choice(v);
   if (ch && !ch.options.includes(choice)) throw new Error(`Escolha onde vai o bônus da Mega: ${ch.options.map((o) => ATTR_PT[o] ?? o).join(" ou ")}.`);
   await updateSheet(item.id, (sh) => {
@@ -40,7 +67,7 @@ export async function megaEvolve(rules, item, { variant = null, choice = null } 
     swapZygarde(sh.pkmn, true);
   });
   const fresh = (await OBR.scene.items.getItems([item.id]))[0];
-  const { refreshTokens, entryAbilities } = await import("./trainer.js?v=0.9.23");
+  const { refreshTokens, entryAbilities } = await import("./trainer.js?v=0.9.28");
   await refreshTokens(rules, [fresh]).catch(() => {});
   const md = rules.megaData(getSheet(fresh).pkmn);
   const label = `Mega ${s.pkmn.species?.current ?? item.name}${v && !/padr/i.test(v) ? ` ${v}` : ""}`;
@@ -58,7 +85,7 @@ export async function megaRevert(rules, item, { quiet = false } = {}) {
     sh.pkmn.is_mega = false;
     swapZygarde(sh.pkmn, false);
   });
-  const { refreshTokens } = await import("./trainer.js?v=0.9.23");
+  const { refreshTokens } = await import("./trainer.js?v=0.9.28");
   await refreshTokens(rules, [(await OBR.scene.items.getItems([item.id]))[0]]).catch(() => {});
   if (!quiet) await pushLog({ kind: "note", attacker: item.name, text: "voltou à forma normal (fim da Mega Evolução)" });
   return true;

@@ -1,6 +1,6 @@
 // PMP rules, ported from the app (pokedex/pokemon.lua). Function names follow the Lua ones.
 // Not ported: trainer bonuses, mega. Amplification points (items, abilities, STAB): amp.js.
-import { moveAmp, damageDice } from "./amp.js?v=0.9.23";
+import { moveAmp, damageDice } from "./amp.js?v=0.9.28";
 
 export const ATTRS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 export const ATTR_PT = { STR: "FOR", DEX: "DES", CON: "CON", INT: "INT", WIS: "SAB", CHA: "CAR" };
@@ -277,8 +277,13 @@ export class Rules {
         diceMult: pts.diceMult, perThree: pts.perThree, halfProf: Math.max(1, Math.floor(this.proficiency(pkmn) / 2)) });
       out.points = { amp: dd.amp, red: dd.red, reroll: dd.reroll, halvings: dd.halvings, sources: pts.notes };
       const times = out.damage.times;
-      const first = formatDamage({ amount: dd.amount, dice: dmg.dice_max, bonus: bonus + dd.flat, times: 1 });
-      const rest = formatDamage({ amount: dd.restAmount, dice: dmg.dice_max, bonus, times: 1 });
+      // the Ataque / Ataque Especial stages, like the app's get_stage_damage_bonus (stage × proficiency);
+      // only in the text: the roll adds them itself (combat.js)
+      const stageKey = out.rangeInfo.kind === "melee" ? "Attack" : "SpecialAttack";
+      const stageBonus = (pkmn.stages?.[stageKey] ?? 0) * this.proficiency(pkmn);
+      out.stageBonus = stageBonus;
+      const first = formatDamage({ amount: dd.amount, dice: dmg.dice_max, bonus: bonus + dd.flat + stageBonus, times: 1 });
+      const rest = formatDamage({ amount: dd.restAmount, dice: dmg.dice_max, bonus: bonus + stageBonus, times: 1 });
       let text = times > 1 && first !== rest ? `${first} + ${times - 1 > 1 ? `${times - 1}x` : ""}${rest}` : `${times > 1 ? `${times}x` : ""}${first}`;
       if (dd.halvings) text = `(${text})/${2 ** dd.halvings}`;
       out.damageText = text + (dd.reroll > 0 ? " (rola 2x, maior)" : dd.reroll < 0 ? " (rola 2x, menor)" : "") + (out.hits ? ` por golpe (${out.hits} ataques)` : "");

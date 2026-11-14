@@ -2,11 +2,12 @@
 // pokéball, fainted). Release, recall, switch (on its turn, with the action; free after U-turn &
 // co.; forced after Roar/Whirlwind), absorb the selected tokens, unlink.
 // Only the trainer's owner and the GM see it.
-import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.23";
-import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.23";
-import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, dropIllusion, createFromCode, refreshTokens, joinInitiativeNow } from "./trainer.js?v=0.9.23";
-import { distanceMeters } from "./map.js?v=0.9.23";
-import { longRest } from "./qol.js?v=0.9.23";
+import { OBR, ID, SHEET_KEY, loadRules, getSheet, getItem, updateSheet, h, syncTheme, pushLog } from "./store.js?v=0.9.28";
+import { CONDITIONS, conditionsOf, TEAMS } from "./battle.js?v=0.9.28";
+import { TRAINER, MAX_PARTY, trainerOf, party, canManage, link, unlink, store, release, switchPokemon, trappedBy, inBall, unmakeTrainer, entryAbilities, hasIllusion, applyIllusion, dropIllusion, createFromCode, refreshTokens, joinInitiativeNow } from "./trainer.js?v=0.9.28";
+import { distanceMeters } from "./map.js?v=0.9.28";
+import { longRest } from "./qol.js?v=0.9.28";
+import { requestPlace, ENTRY_RANGE } from "./spot.js?v=0.9.28";
 
 const params = new URLSearchParams(location.search);
 const trainerId = params.get("id");
@@ -121,14 +122,14 @@ async function doRest() {
 
 async function doRelease(p) {
   await act(async () => {
-    const combat = await running();
-    await release(state.rules, p, state.trainer);
-    if (combat) {
-      // entering mid-combat (not a switch: after a knockout, or the first one out): rolls initiative now,
-      // shows up in Pretty Sordid and acts normally when its turn comes
-      const waits = await joinInitiativeNow(state.rules, p);
-      await pushLog({ kind: "note", attacker: state.trainer.name, text: `${p.name} entrou no combate (já está na iniciativa; ${waits ? "o aliado que caiu ainda não tinha agido: age a partir da próxima rodada" : "age quando chegar a vez dele"})` });
+    if (await running()) {
+      // entering mid-combat (not a switch: after a knockout, or the first one out): the player clicks where
+      // it comes out, up to 9 m from the trainer (the background does the rest: initiative, abilities)
+      await requestPlace({ action: "release", pokemonId: p.id, trainerId: state.trainer.id, label: realName(p), center: { ...state.trainer.position }, maxM: ENTRY_RANGE });
+      state.msg = `Clique no mapa onde ${realName(p)} vai sair (até ${ENTRY_RANGE} m do treinador).`;
+      return;
     }
+    await release(state.rules, p, state.trainer);
     await entryAbilities(state.rules, await getItem(p.id));
   });
 }
@@ -146,10 +147,16 @@ async function doRecall(p) {
 async function doSwitch(from, to) {
   await act(async () => {
     const must = getSheet(from).battle?.mustSwitch;
-    await switchPokemon(state.rules, from, to, {
-      forced: !!must?.forced, free: !!must?.free, batonPass: !!must?.batonPass, by: must?.by,
-    });
+    const opts = { forced: !!must?.forced, free: !!must?.free, batonPass: !!must?.batonPass, by: must?.by };
     state.switchFrom = null;
+    // in place of a fainted one, in a fight: it comes out where the player clicks (up to 9 m from the
+    // trainer); a normal switch takes the place of the one leaving
+    if (getSheet(from).pkmn.hp.current <= 0 && await running()) {
+      await requestPlace({ action: "switch", fromId: from.id, pokemonId: to.id, trainerId: state.trainer.id, opts, label: realName(to), center: { ...state.trainer.position }, maxM: ENTRY_RANGE });
+      state.msg = `Clique no mapa onde ${realName(to)} vai sair (até ${ENTRY_RANGE} m do treinador).`;
+      return;
+    }
+    await switchPokemon(state.rules, from, to, opts);
   });
 }
 

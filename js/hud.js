@@ -1,19 +1,19 @@
 // Quick sheet: opens when a controllable Pokémon is selected. HP + moves; pick a move,
 // click the targets on the map, then roll. Initiative goes to Pretty Sordid.
-import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.23";
-import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.23";
-import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.23";
+import { OBR, ID, HUD_ID, loadRules, getSheet, getItem, updatePokemon, updateSheet, canEdit, h, syncTheme, pushLog } from "./store.js?v=0.9.28";
+import { TYPE_PT, ATTR_PT, signed, fmtM } from "./rules.js?v=0.9.28";
+import { useMove, TurnError, throwAttack, THROW, throwRange, grapple, escapeGrapple, releaseGrapple } from "./combat.js?v=0.9.28";
 const GRAB = "__grab";
-import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.23";
-import { rollPending } from "./trainer.js?v=0.9.23";
-import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.23";
-import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.23";
-import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.23";
-import { runPrepared } from "./prepared.js?v=0.9.23";
-import { megaOptions, megaEvolve, megaRevert } from "./mega.js?v=0.9.23";
-import { fieldNow, fieldText } from "./field.js?v=0.9.23";
-import { seesTarget } from "./combat.js?v=0.9.23";
-import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.23";
+import { TYPE_COLOR, openSheet, openHud, openStages, openTrainer, hudPosition, saveHudPosition, hudTop, hudRoom, saveHudHeight, die, markHudAlive } from "./ui.js?v=0.9.28";
+import { rollPending } from "./trainer.js?v=0.9.28";
+import { checkRange, OutOfRange, rollInitiative, initiativeOf, distanceMeters } from "./map.js?v=0.9.28";
+import { AIM_ABORT, AIM_STALE, requestAim, aimState } from "./area.js?v=0.9.28";
+import { CONDITIONS, STAGE_SHORT, conditionsOf, econOf, inInitiative, isActive, moveTiming, has, chooseCost, allies, canSeeFull, ampPoints, redPoints, passTurn, processTurn } from "./battle.js?v=0.9.28";
+import { runPrepared } from "./prepared.js?v=0.9.28";
+import { megaOptions, megaEvolve, megaRevert, megaRequirement } from "./mega.js?v=0.9.28";
+import { fieldNow, fieldText } from "./field.js?v=0.9.28";
+import { seesTarget } from "./combat.js?v=0.9.28";
+import { special, chargingOf, invulnOf, invulnText, invulnCheck, releaseReady, movement, jumps, jumpOpts, dash, changeAltitude, disengage, oaMoves } from "./tactics.js?v=0.9.28";
 
 const HELPING_HAND = "Helping Hand";
 
@@ -163,18 +163,55 @@ function megaControl(pkmn) {
       h("span", { class: "spacer" }),
       h("button", { class: "small", disabled: state.busy, onclick: run(() => megaRevert(rules, state.item)) }, "Desfazer Mega"));
   }
-  const variant = opts.variants ? (opts.variants.includes(state.megaVariant) ? state.megaVariant : opts.variants[0]) : null;
-  const choice = opts.choice(variant);
-  const pick = choice ? (choice.options.includes(state.megaChoice) ? state.megaChoice : choice.options[0]) : null;
+  // the Mega Stone / Orb / Dragon Ascent: without it, only the GM (forcing)
+  const battle = getSheet(state.item)?.battle;
+  const needOf = (v) => megaRequirement(rules, { ...pkmn, battle }, v);
+  const go = (variant, choice) => run(async () => {
+    state.megaAsk = null;
+    const r = await megaEvolve(rules, state.item, { variant, choice, force: !!needOf(variant) && state.isGM });
+    if (r?.notes?.length) OBR.notification.show(r.notes.join(" · "), "INFO");
+  });
+  // Megas to pick from (X / Y / Z / Padrão) or an attribute to choose (Mega Beedrill): ask first, like the app
+  const asks = (opts.variants?.length ?? 0) > 1 || (opts.variants ?? [null]).some((v) => opts.choice(v));
+  const single = opts.variants?.length === 1 ? opts.variants[0] : null;
+  const need = asks ? null : needOf(single);
+  if (state.megaAsk) {
+    const ask = state.megaAsk;
+    const cancel = h("button", { class: "small", onclick: () => { state.megaAsk = null; render(); } }, "Cancelar");
+    // 2nd step: where the attribute bonus goes
+    const variant = ask.variant ?? (opts.variants ? null : undefined);
+    if (variant !== null) {
+      const v = variant === undefined ? single : variant;
+      const choice = opts.choice(v);
+      if (choice) {
+        return h("div", { class: "hud-target", style: "margin-top:4px" },
+          h("div", { class: "small" }, h("b", {}, `${megaLabel(rules, pkmn, v)}`), ` · bônus de +${choice.bonus} em:`),
+          h("div", { class: "row", style: "gap:6px;margin-top:6px;flex-wrap:wrap" },
+            choice.options.map((o) => h("button", { class: "small primary", disabled: state.busy, onclick: go(v, o) }, `+${choice.bonus} ${ATTR_PT[o] ?? o}`)), cancel));
+      }
+    }
+    // 1st step: which Mega
+    return h("div", { class: "hud-target", style: "margin-top:4px" },
+      h("div", { class: "small" }, h("b", {}, "Pra qual Mega Evoluir?")),
+      h("div", { class: "row", style: "gap:6px;margin-top:6px;flex-wrap:wrap" },
+        (opts.variants ?? []).map((v) => {
+          const n = needOf(v);
+          const md = rules.megaData(pkmn, v);
+          return h("button", {
+            class: "small primary", disabled: state.busy || (n && !state.isGM),
+            title: n ?? `${md?.ability ?? ""}${md?.types ? ` · ${md.types.map((t) => TYPE_PT[t] ?? t).join("/")}` : ""}`,
+            onclick: () => { if (opts.choice(v)) { state.megaAsk = { variant: v }; render(); } else go(v, null)(); },
+          }, `${n ? "🔒 " : ""}${megaLabel(rules, pkmn, v)}${md?.ability ? ` · ${md.ability}` : ""}`);
+        }), cancel));
+  }
   return h("div", { class: "row small", style: "margin-top:4px;gap:6px;flex-wrap:wrap" },
-    opts.variants ? h("select", { title: "Qual Mega", onchange: (e) => { state.megaVariant = e.target.value; render(); } },
-      opts.variants.map((v) => h("option", { value: v, selected: v === variant }, /padr/i.test(v) ? "Padrão" : `Mega ${v}`))) : null,
-    choice ? h("select", { title: `Bônus de +${choice.bonus} em`, onchange: (e) => { state.megaChoice = e.target.value; } },
-      choice.options.map((o) => h("option", { value: o, selected: o === pick }, `+${choice.bonus} ${ATTR_PT[o] ?? o}`))) : null,
+    need ? h("span", { class: "muted", style: "flex-basis:100%" }, `🔒 ${need}`) : null,
     h("span", { class: "spacer" }),
-    h("button", { class: "small primary", disabled: state.busy, title: "Atributos, CA, deslocamento, tipos e habilidade da Mega; +1 ponto de Amplificação em todo Move",
-      onclick: run(async () => { const r = await megaEvolve(rules, state.item, { variant, choice: pick }); if (r?.notes?.length) OBR.notification.show(r.notes.join(" · "), "INFO"); }) }, "✨ Mega Evoluir"));
+    h("button", { class: "small primary", disabled: state.busy || (need && !state.isGM), title: need ? need : "Atributos, CA, deslocamento, tipos e habilidade da Mega; +1 ponto de Amplificação em todo Move",
+      onclick: asks ? () => { state.megaAsk = {}; render(); } : go(single, null) },
+      need ? (state.isGM ? "✨ Mega (mestre: forçar)" : "✨ Mega Evoluir") : "✨ Mega Evoluir"));
 }
+const megaLabel = (rules, pkmn, v) => `Mega ${pkmn.species?.current ?? ""}${v && !/padr/i.test(v) ? ` ${v}` : ""}`.trim();
 
 function condTip(key, v) {
   if (key === "Confused") return `Confuso: mais ${v.left ?? "?"} turno(s)`;
